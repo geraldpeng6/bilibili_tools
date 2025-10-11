@@ -555,6 +555,12 @@ class EventHandlers {
       counter.textContent = `${current}/${total}`;
     }
 
+    // 显示/隐藏搜索导航
+    const searchNav = document.getElementById('search-nav');
+    if (searchNav) {
+      searchNav.style.display = total > 0 ? 'flex' : 'none';
+    }
+
     const prevBtn = document.getElementById('search-prev');
     const nextBtn = document.getElementById('search-next');
     

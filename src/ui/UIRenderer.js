@@ -22,9 +22,8 @@ class UIRenderer {
     let html = `
       <div class="subtitle-header">
         <div class="subtitle-search-container">
-          <span class="search-icon">🔍</span>
-          <input type="text" class="search-input" placeholder="搜索内容..." id="subtitle-search-input">
-          <div class="search-nav">
+          <input type="text" class="search-input" placeholder="搜索..." id="subtitle-search-input">
+          <div class="search-nav" id="search-nav" style="display: none;">
             <span class="search-counter" id="search-counter">0/0</span>
             <button class="search-nav-btn search-prev" id="search-prev" title="上一个">↑</button>
             <button class="search-nav-btn search-next" id="search-next" title="下一个">↓</button>

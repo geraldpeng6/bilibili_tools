@@ -79,15 +79,17 @@ export const CSS_STYLES = `
 
   /* ==================== 字幕容器样式 ==================== */
   #subtitle-container {
-    position: absolute;
+    position: fixed;
     top: 0;
-    left: 100%;
-    width: 420px;
-    height: 100%;
+    right: 0;
+    width: auto;
+    min-width: 420px;
+    max-width: calc(100vw - 1200px);
+    height: 100vh;
     background: rgba(0, 0, 0, 0.85);
     backdrop-filter: blur(12px);
     color: #fff;
-    border-radius: 16px;
+    border-radius: 0;
     font-size: 14px;
     line-height: 1.8;
     display: none;
@@ -95,9 +97,9 @@ export const CSS_STYLES = `
     overflow: hidden;
     box-shadow: -4px 0 24px rgba(0,0,0,0.5);
     border: 1px solid rgba(254, 235, 234, 0.2);
+    border-right: none;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: ${Z_INDEX.CONTAINER - 1};
-    margin-left: 10px;
   }
 
   #subtitle-container.show {
@@ -124,24 +126,19 @@ export const CSS_STYLES = `
   .subtitle-search-container {
     display: flex;
     align-items: center;
-    gap: 8px;
-    flex: 1;
+    gap: 6px;
     background: rgba(0, 0, 0, 0.3);
     border-radius: 8px;
     padding: 6px 10px;
     border: 1px solid rgba(254, 235, 234, 0.2);
     transition: all 0.2s;
+    max-width: 280px;
   }
 
   .subtitle-search-container:focus-within {
     border-color: #feebea;
     background: rgba(0, 0, 0, 0.4);
     box-shadow: 0 0 0 2px rgba(254, 235, 234, 0.1);
-  }
-
-  .search-icon {
-    font-size: 16px;
-    opacity: 0.7;
   }
 
   .search-input {
@@ -162,12 +159,13 @@ export const CSS_STYLES = `
     display: flex;
     align-items: center;
     gap: 4px;
+    flex-shrink: 0;
   }
 
   .search-counter {
     font-size: 12px;
     color: rgba(255, 255, 255, 0.6);
-    min-width: 36px;
+    min-width: 32px;
     text-align: center;
   }
 
