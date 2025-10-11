@@ -80,12 +80,12 @@ export const CSS_STYLES = `
   /* ==================== 字幕容器样式 ==================== */
   #subtitle-container {
     position: absolute;
-    top: 20%;
+    top: 10%;
     left: 100%;
     width: auto;
     min-width: 420px;
     max-width: 500px;
-    height: 60%;
+    height: 80%;
     background: rgba(0, 0, 0, 0.85);
     backdrop-filter: blur(12px);
     color: #fff;
@@ -451,6 +451,10 @@ export const CSS_STYLES = `
     font-size: 14px;
     line-height: 1.7;
     word-wrap: break-word;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    white-space: normal;
+    max-width: 100%;
   }
 
   .ai-summary-loading {
@@ -466,6 +470,8 @@ export const CSS_STYLES = `
     margin-top: 12px;
     margin-bottom: 8px;
     font-weight: 700;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
   }
 
   .ai-summary-content h1 { font-size: 17px; }
@@ -476,14 +482,22 @@ export const CSS_STYLES = `
   .ai-summary-content ol {
     margin: 8px 0;
     padding-left: 20px;
+    max-width: 100%;
   }
 
   .ai-summary-content li {
     margin: 4px 0;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    word-break: break-word;
   }
 
   .ai-summary-content p {
     margin: 8px 0;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    white-space: normal;
   }
 
   .ai-summary-content code {
@@ -503,12 +517,17 @@ export const CSS_STYLES = `
     overflow-x: auto;
     margin: 10px 0;
     border: 1px solid rgba(254, 235, 234, 0.2);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    max-width: 100%;
   }
 
   .ai-summary-content pre code {
     background-color: transparent;
     padding: 0;
     border: none;
+    white-space: pre-wrap;
+    word-wrap: break-word;
   }
 
   .ai-summary-content blockquote {
@@ -518,6 +537,8 @@ export const CSS_STYLES = `
     padding-left: 16px;
     margin: 10px 0;
     border-radius: 4px;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
   }
 
   .ai-summary-content strong {
