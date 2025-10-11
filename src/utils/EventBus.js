@@ -1,25 +1,37 @@
 /**
  * 事件总线模块
  * 用于解耦不同模块之间的通信
+ * 优化：添加模块管理、批量清理、防止内存泄漏
  */
 
 class EventBus {
   constructor() {
-    this.events = new Map();
+    this.events = new Map(); // { event: [handlers] }
+    this.modules = new Map(); // { module: Set<{event, handler}> }
+    this.subscriptionId = 0;
   }
 
   /**
    * 订阅事件
    * @param {string} event - 事件名称
    * @param {Function} handler - 事件处理函数
+   * @param {string} module - 模块名称（用于批量清理）
    * @returns {Function} - 取消订阅的函数
    */
-  on(event, handler) {
+  on(event, handler, module = null) {
     if (!this.events.has(event)) {
       this.events.set(event, []);
     }
     
     this.events.get(event).push(handler);
+    
+    // 如果指定了模块，追踪订阅关系
+    if (module) {
+      if (!this.modules.has(module)) {
+        this.modules.set(module, new Set());
+      }
+      this.modules.get(module).add({ event, handler });
+    }
     
     // 返回取消订阅的函数
     return () => this.off(event, handler);
@@ -84,6 +96,22 @@ class EventBus {
    */
   clear() {
     this.events.clear();
+    this.modules.clear();
+  }
+
+  /**
+   * 清理特定模块的所有订阅
+   * @param {string} module - 模块名称
+   */
+  clearModule(module) {
+    const subscriptions = this.modules.get(module);
+    if (!subscriptions) return;
+
+    subscriptions.forEach(({ event, handler }) => {
+      this.off(event, handler);
+    });
+    
+    this.modules.delete(module);
   }
 
   /**
@@ -93,6 +121,18 @@ class EventBus {
    */
   listenerCount(event) {
     return this.events.has(event) ? this.events.get(event).length : 0;
+  }
+
+  /**
+   * 获取所有模块的订阅统计
+   * @returns {Object}
+   */
+  getModuleStats() {
+    const stats = {};
+    this.modules.forEach((subscriptions, module) => {
+      stats[module] = subscriptions.size;
+    });
+    return stats;
   }
 }
 

@@ -46,7 +46,26 @@ export default defineConfig({
   ],
   build: {
     target: 'esnext',
-    minify: false // 保持代码可读性，方便调试
+    minify: 'terser', // 启用代码压缩
+    terserOptions: {
+      compress: {
+        drop_console: false, // 保留 console（用于调试）
+        drop_debugger: true,  // 移除 debugger
+        pure_funcs: [], // 不移除任何函数调用
+      },
+      format: {
+        comments: false, // 移除注释
+      }
+    },
+    // 优化依赖打包
+    rollupOptions: {
+      output: {
+        // 手动代码分割（为未来模块化做准备）
+        manualChunks: {
+          // 可以在此定义代码分割策略
+        }
+      }
+    }
   }
 });
 

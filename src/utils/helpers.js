@@ -213,3 +213,174 @@ export function throttle(func, limit) {
   };
 }
 
+/**
+ * 使用 requestAnimationFrame 的节流函数（性能更优）
+ * @param {Function} func - 要节流的函数
+ * @returns {Function}
+ */
+export function throttleRAF(func) {
+  let rafId = null;
+  return function executedFunction(...args) {
+    if (rafId === null) {
+      rafId = requestAnimationFrame(() => {
+        func.apply(this, args);
+        rafId = null;
+      });
+    }
+  };
+}
+
+/**
+ * 函数结果缓存（记忆化）
+ * @param {Function} func - 要缓存的函数
+ * @param {Function} keyGenerator - 生成缓存key的函数
+ * @returns {Function}
+ */
+export function memoize(func, keyGenerator = (...args) => JSON.stringify(args)) {
+  const cache = new Map();
+  return function memoized(...args) {
+    const key = keyGenerator(...args);
+    if (cache.has(key)) {
+      return cache.get(key);
+    }
+    const result = func.apply(this, args);
+    cache.set(key, result);
+    return result;
+  };
+}
+
+/**
+ * 二分查找
+ * @param {Array} arr - 已排序的数组
+ * @param {*} target - 目标值
+ * @param {Function} compareFn - 比较函数，返回负数、0或正数
+ * @returns {number} - 找到的索引，或应该插入的位置（负数）
+ */
+export function binarySearch(arr, target, compareFn = (a, b) => a - b) {
+  let left = 0;
+  let right = arr.length - 1;
+  
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2);
+    const comparison = compareFn(arr[mid], target);
+    
+    if (comparison === 0) {
+      return mid;
+    } else if (comparison < 0) {
+      left = mid + 1;
+    } else {
+      right = mid - 1;
+    }
+  }
+  
+  return -(left + 1); // 返回负数表示未找到，绝对值-1是插入位置
+}
+
+/**
+ * 查找字幕索引（针对时间范围优化的二分查找）
+ * @param {Array} subtitles - 字幕数组 [{from, to, content}, ...]
+ * @param {number} currentTime - 当前时间（秒）
+ * @returns {number} - 当前时间对应的字幕索引，未找到返回-1
+ */
+export function findSubtitleIndex(subtitles, currentTime) {
+  if (!subtitles || subtitles.length === 0) return -1;
+  
+  // 线性查找（如果数组很小）
+  if (subtitles.length < 50) {
+    for (let i = 0; i < subtitles.length; i++) {
+      if (currentTime >= subtitles[i].from && currentTime <= subtitles[i].to) {
+        return i;
+      }
+    }
+    return -1;
+  }
+  
+  // 二分查找起始点
+  let left = 0;
+  let right = subtitles.length - 1;
+  
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2);
+    const subtitle = subtitles[mid];
+    
+    if (currentTime >= subtitle.from && currentTime <= subtitle.to) {
+      return mid;
+    } else if (currentTime < subtitle.from) {
+      right = mid - 1;
+    } else {
+      left = mid + 1;
+    }
+  }
+  
+  return -1;
+}
+
+/**
+ * DOM 元素池（复用 DOM 元素，减少创建/销毁开销）
+ * @param {string} tagName - 元素标签名
+ * @param {number} initialSize - 初始池大小
+ * @returns {Object} - 包含 acquire() 和 release() 方法的对象
+ */
+export function createDOMPool(tagName, initialSize = 10) {
+  const pool = [];
+  const inUse = new Set();
+  
+  // 初始化池
+  for (let i = 0; i < initialSize; i++) {
+    pool.push(document.createElement(tagName));
+  }
+  
+  return {
+    /**
+     * 获取一个元素
+     * @returns {Element}
+     */
+    acquire() {
+      let element;
+      if (pool.length > 0) {
+        element = pool.pop();
+      } else {
+        element = document.createElement(tagName);
+      }
+      inUse.add(element);
+      return element;
+    },
+    
+    /**
+     * 释放一个元素
+     * @param {Element} element
+     */
+    release(element) {
+      if (!inUse.has(element)) return;
+      
+      // 清理元素状态
+      element.className = '';
+      element.textContent = '';
+      element.removeAttribute('style');
+      
+      inUse.delete(element);
+      pool.push(element);
+    },
+    
+    /**
+     * 获取统计信息
+     * @returns {Object}
+     */
+    getStats() {
+      return {
+        poolSize: pool.length,
+        inUse: inUse.size,
+        total: pool.length + inUse.size
+      };
+    },
+    
+    /**
+     * 清空池
+     */
+    clear() {
+      pool.length = 0;
+      inUse.clear();
+    }
+  };
+}
+

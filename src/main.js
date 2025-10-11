@@ -489,14 +489,9 @@ class BilibiliSubtitleExtractor {
   }
 
   /**
-   * 监听视频切换
+   * 监听视频切换（优化：使用 History API 劫持替代 MutationObserver）
    */
   observeVideoChange() {
-    if (!document.body) {
-      setTimeout(() => this.observeVideoChange(), 100);
-      return;
-    }
-
     let lastUrl = location.href;
     let lastBvid = location.href.match(/BV[1-9A-Za-z]{10}/)?.[0];
     let lastCid = null;
@@ -513,13 +508,16 @@ class BilibiliSubtitleExtractor {
 
     lastCid = getCurrentCid();
 
-    new MutationObserver(() => {
+    // 处理URL变化的函数
+    const handleUrlChange = () => {
       const url = location.href;
       const currentBvid = url.match(/BV[1-9A-Za-z]{10}/)?.[0];
       const currentCid = getCurrentCid();
 
       // 当BV号或CID改变时重新初始化
       if (url !== lastUrl && (currentBvid !== lastBvid || currentCid !== lastCid)) {
+        console.log('[App] 检测到视频切换:', { from: lastBvid, to: currentBvid });
+        
         lastUrl = url;
         lastBvid = currentBvid;
         lastCid = currentCid;
@@ -538,7 +536,64 @@ class BilibiliSubtitleExtractor {
           subtitleService.checkSubtitleButton();
         }, TIMING.VIDEO_SWITCH_DELAY);
       }
-    }).observe(document.body, { subtree: true, childList: true });
+    };
+
+    // 方法1：劫持 pushState 和 replaceState（B站使用这些API进行路由切换）
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+
+    history.pushState = function(...args) {
+      originalPushState.apply(this, args);
+      handleUrlChange();
+    };
+
+    history.replaceState = function(...args) {
+      originalReplaceState.apply(this, args);
+      handleUrlChange();
+    };
+
+    // 方法2：监听 popstate 事件（浏览器前进/后退）
+    window.addEventListener('popstate', handleUrlChange);
+
+    // 方法3：定期检查（降级方案，1秒检查一次）
+    const checkInterval = setInterval(handleUrlChange, 1000);
+
+    // 保存清理函数
+    this.urlChangeCleanup = () => {
+      history.pushState = originalPushState;
+      history.replaceState = originalReplaceState;
+      window.removeEventListener('popstate', handleUrlChange);
+      clearInterval(checkInterval);
+    };
+
+    console.log('[App] 视频切换监听已启动（使用 History API 劫持）');
+  }
+
+  /**
+   * 清理应用资源
+   */
+  cleanup() {
+    console.log('[App] 开始清理应用资源');
+    
+    // 清理 URL 监听
+    if (this.urlChangeCleanup) {
+      this.urlChangeCleanup();
+    }
+    
+    // 清理视频质量服务
+    if (this.videoQualityService) {
+      this.videoQualityService.stop();
+    }
+    
+    // 清理 SponsorBlock 服务
+    if (sponsorBlockService.playerController) {
+      sponsorBlockService.playerController.destroy();
+    }
+    
+    // 清理速度控制服务
+    speedControlService.destroy();
+    
+    console.log('[App] 应用资源清理完成');
   }
 }
 

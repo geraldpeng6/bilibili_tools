@@ -100,11 +100,16 @@ class UIRenderer {
         <div class="ai-summary-content ai-summary-loading">正在生成总结...</div>
       `;
     } else if (summary) {
+      // 确保marked库已加载
+      const parsedHTML = (typeof marked !== 'undefined' && marked.parse) 
+        ? marked.parse(summary) 
+        : summary.replace(/\n/g, '<br>');
+      
       section.innerHTML = `
         <div class="ai-summary-title">
           <span>✨ AI 视频总结</span>
         </div>
-        <div class="ai-summary-content">${marked.parse(summary)}</div>
+        <div class="ai-summary-content">${parsedHTML}</div>
       `;
     }
 
@@ -129,7 +134,11 @@ class UIRenderer {
       const summaryContent = summarySection.querySelector('.ai-summary-content');
       if (summaryContent) {
         summaryContent.classList.remove('ai-summary-loading');
-        summaryContent.innerHTML = marked.parse(summary);
+        // 确保marked库已加载
+        const parsedHTML = (typeof marked !== 'undefined' && marked.parse) 
+          ? marked.parse(summary) 
+          : summary.replace(/\n/g, '<br>');
+        summaryContent.innerHTML = parsedHTML;
       }
     }
   }

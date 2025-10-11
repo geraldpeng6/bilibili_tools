@@ -14,6 +14,7 @@ import notification from './Notification.js';
 import uiRenderer from './UIRenderer.js';
 import notesPanel from './NotesPanel.js';
 import { SELECTORS, AI_API_KEY_URLS } from '../constants.js';
+import { debounce, throttleRAF, findSubtitleIndex } from '../utils/helpers.js';
 
 class EventHandlers {
   constructor() {
@@ -31,6 +32,12 @@ class EventHandlers {
     this.searchMatches = [];
     this.currentMatchIndex = -1;
     this.searchTerm = '';
+    // Subtitle highlight optimization
+    this.subtitleDataCache = null;
+    this.currentHighlightedIndex = -1;
+    // Debounced/throttled functions
+    this.debouncedSearch = null;
+    this.throttledHighlight = null;
   }
 
   /**
@@ -109,11 +116,18 @@ class EventHandlers {
       });
     }
 
-    // 搜索输入框
+    // 搜索输入框 - 使用防抖优化
     const searchInput = container.querySelector('#subtitle-search-input');
     if (searchInput) {
+      // 创建防抖函数（300ms）
+      if (!this.debouncedSearch) {
+        this.debouncedSearch = debounce((container, value) => {
+          this.handleSearch(container, value);
+        }, 300);
+      }
+      
       searchInput.addEventListener('input', (e) => {
-        this.handleSearch(container, e.target.value);
+        this.debouncedSearch(container, e.target.value);
       });
       
       // 回车键循环跳转到下一个匹配项
@@ -139,13 +153,29 @@ class EventHandlers {
       });
     }
 
-    // 字幕项点击跳转
-    const subtitleItems = container.querySelectorAll('.subtitle-item');
-    subtitleItems.forEach(item => {
-      item.addEventListener('click', () => {
+    // 使用事件委托处理字幕项点击和保存按钮（优化：减少事件监听器）
+    container.addEventListener('click', (e) => {
+      // 处理保存笔记按钮
+      const saveBtn = e.target.closest('.save-subtitle-note-btn');
+      if (saveBtn) {
+        e.stopPropagation();
+        const content = saveBtn.getAttribute('data-content');
+        if (content) {
+          notesService.saveSubtitleNote(content);
+          saveBtn.textContent = '✓';
+          setTimeout(() => {
+            saveBtn.textContent = '保存';
+          }, 1000);
+        }
+        return;
+      }
+
+      // 处理字幕项点击
+      const subtitleItem = e.target.closest('.subtitle-item');
+      if (subtitleItem) {
         const video = document.querySelector(SELECTORS.VIDEO);
         if (video) {
-          const startTime = parseFloat(item.dataset.from);
+          const startTime = parseFloat(subtitleItem.dataset.from);
           
           // 先移除所有高亮
           container.querySelectorAll('.subtitle-item').forEach(i => {
@@ -153,28 +183,12 @@ class EventHandlers {
           });
           
           // 只高亮当前点击的
-          item.classList.add('current');
+          subtitleItem.classList.add('current');
           
           // 跳转视频
           video.currentTime = startTime;
         }
-      });
-    });
-
-    // 保存笔记按钮
-    const saveButtons = container.querySelectorAll('.save-subtitle-note-btn');
-    saveButtons.forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const content = btn.getAttribute('data-content');
-        if (content) {
-          notesService.saveSubtitleNote(content);
-          btn.textContent = '✓';
-          setTimeout(() => {
-            btn.textContent = '保存';
-          }, 1000);
-        }
-      });
+      }
     });
 
     // 同步字幕高亮
@@ -337,32 +351,57 @@ class EventHandlers {
   }
 
   /**
-   * 同步字幕高亮
+   * 同步字幕高亮（优化版：使用节流+二分查找+缓存）
    * @param {HTMLElement} container - 字幕容器
    */
   syncSubtitleHighlight(container) {
     const video = document.querySelector(SELECTORS.VIDEO);
+    if (!video) return;
 
-    if (video) {
-      video.addEventListener('timeupdate', () => {
-        const currentTime = video.currentTime;
-        const items = container.querySelectorAll('.subtitle-item');
+    // 缓存字幕数据
+    const items = Array.from(container.querySelectorAll('.subtitle-item'));
+    this.subtitleDataCache = items.map(item => ({
+      element: item,
+      from: parseFloat(item.dataset.from),
+      to: parseFloat(item.dataset.to)
+    }));
 
-        // 找到第一个匹配的字幕（按顺序）
-        let foundMatch = false;
-        items.forEach(item => {
-          const from = parseFloat(item.dataset.from);
-          const to = parseFloat(item.dataset.to);
-
-          if (!foundMatch && currentTime >= from && currentTime <= to) {
-            item.classList.add('current');
-            foundMatch = true;
-          } else {
-            item.classList.remove('current');
-          }
-        });
+    // 创建节流函数（使用 RAF 优化性能）
+    if (!this.throttledHighlight) {
+      this.throttledHighlight = throttleRAF((currentTime) => {
+        this.updateSubtitleHighlight(currentTime);
       });
     }
+
+    video.addEventListener('timeupdate', () => {
+      this.throttledHighlight(video.currentTime);
+    });
+  }
+
+  /**
+   * 更新字幕高亮（使用二分查找）
+   * @param {number} currentTime - 当前播放时间
+   */
+  updateSubtitleHighlight(currentTime) {
+    if (!this.subtitleDataCache || this.subtitleDataCache.length === 0) return;
+
+    // 使用二分查找定位当前字幕
+    const targetIndex = findSubtitleIndex(this.subtitleDataCache, currentTime);
+
+    // 如果当前高亮的字幕没变，跳过更新
+    if (targetIndex === this.currentHighlightedIndex) return;
+
+    // 移除旧高亮
+    if (this.currentHighlightedIndex >= 0 && this.currentHighlightedIndex < this.subtitleDataCache.length) {
+      this.subtitleDataCache[this.currentHighlightedIndex].element.classList.remove('current');
+    }
+
+    // 添加新高亮
+    if (targetIndex >= 0) {
+      this.subtitleDataCache[targetIndex].element.classList.add('current');
+    }
+
+    this.currentHighlightedIndex = targetIndex;
   }
 
   /**

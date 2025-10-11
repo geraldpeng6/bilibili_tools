@@ -112,7 +112,8 @@ class VideoPlayerController {
     this.segments = [];
     this.currentBVID = null;
     this.lastSkipTime = 0;
-    this.checkInterval = null;
+    this.checkInterval = null; // 保留以防降级
+    this.rafId = null; // 使用RAF替代interval
     this.currentPrompt = null;
     this.promptedSegments = new Set();
     this.ignoredSegments = new Set();
@@ -388,24 +389,21 @@ class VideoPlayerController {
   }
 
   /**
-   * 开始监控
+   * 开始监控（优化：使用 RAF 替代 setInterval）
    */
   startMonitoring() {
     if (!this.video) {
       return;
     }
 
-    // 使用轮询方式检查
-    this.checkInterval = setInterval(() => {
+    // 使用 requestAnimationFrame 替代 setInterval（性能更优）
+    const loop = () => {
       this.checkAndSkip();
-    }, 200);
+      this.rafId = requestAnimationFrame(loop);
+    };
+    this.rafId = requestAnimationFrame(loop);
 
-    // 页面卸载时清理
-    window.addEventListener('beforeunload', () => {
-      if (this.checkInterval) {
-        clearInterval(this.checkInterval);
-      }
-    });
+    console.log('[SponsorBlock] 开始监控（使用RAF）');
   }
 
   /**
@@ -624,24 +622,44 @@ class VideoPlayerController {
   }
 
   /**
-   * 销毁控制器
+   * 销毁控制器（优化：完整清理所有资源）
    */
   destroy() {
+    console.log('[SponsorBlock] 销毁播放器控制器');
+    
+    // 清理 RAF
+    if (this.rafId) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+    
+    // 清理旧的 interval（如果存在）
     if (this.checkInterval) {
       clearInterval(this.checkInterval);
+      this.checkInterval = null;
     }
+    
+    // 清理提示和弹窗
     this.closePrompt();
     this.closeSegmentDetails();
     
+    // 清理进度条标记
     if (this.markerContainer) {
       this.markerContainer.remove();
       this.markerContainer = null;
     }
     
+    // 清理 MutationObserver
     if (this.playerObserver) {
       this.playerObserver.disconnect();
       this.playerObserver = null;
     }
+    
+    // 清理状态
+    this.promptedSegments.clear();
+    this.ignoredSegments.clear();
+    this.segments = [];
+    this.video = null;
   }
 }
 

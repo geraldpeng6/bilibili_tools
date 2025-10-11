@@ -79,18 +79,17 @@ export const CSS_STYLES = `
 
   /* ==================== 字幕容器样式 ==================== */
   #subtitle-container {
-    position: fixed;
-    top: 10px;
-    right: 0;
-    bottom: 10px;
+    position: absolute;
+    top: 20%;
+    left: 100%;
     width: auto;
     min-width: 420px;
-    max-width: calc(100vw - 1200px);
-    height: auto;
+    max-width: 500px;
+    height: 60%;
     background: rgba(0, 0, 0, 0.85);
     backdrop-filter: blur(12px);
     color: #fff;
-    border-radius: 12px 0 0 12px;
+    border-radius: 12px;
     font-size: 14px;
     line-height: 1.8;
     display: none;
@@ -98,9 +97,9 @@ export const CSS_STYLES = `
     overflow: hidden;
     box-shadow: -4px 0 24px rgba(0,0,0,0.5);
     border: 1px solid rgba(254, 235, 234, 0.2);
-    border-right: none;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: ${Z_INDEX.CONTAINER};
+    margin-left: 10px;
   }
 
   #subtitle-container.show {
@@ -119,7 +118,7 @@ export const CSS_STYLES = `
     flex-shrink: 0;
     background: rgba(254, 235, 234, 0.15);
     color: #fff;
-    border-radius: 16px 16px 0 0;
+    border-radius: 12px 12px 0 0;
     user-select: none;
     gap: 12px;
   }

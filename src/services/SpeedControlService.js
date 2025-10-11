@@ -690,16 +690,53 @@ class SpeedControlService {
   }
 
   /**
-   * 清理资源
+   * 清理资源（优化：完整清理所有资源）
    */
   destroy() {
+    console.log('[SpeedControl] 开始清理资源');
+    
+    // 清理 MutationObserver
     if (this.observer) {
       this.observer.disconnect();
+      this.observer = null;
     }
     
+    // 清理所有媒体的音量检测
     this.getMediaElements().forEach(media => {
       this.stopVolumeDetection(media);
     });
+    
+    // 清理响度图表
+    if (this.state.volumeChart) {
+      this.state.volumeChart.remove();
+      this.state.volumeChart = null;
+    }
+    
+    // 清理所有 AudioContext
+    this.state.mediaAnalyzers.forEach((analyzer, media) => {
+      if (analyzer.intervalId) {
+        clearInterval(analyzer.intervalId);
+      }
+      if (analyzer.context && analyzer.context.state !== 'closed') {
+        analyzer.context.close().catch(err => {
+          console.error('[SpeedControl] 关闭 AudioContext 失败:', err);
+        });
+      }
+    });
+    this.state.mediaAnalyzers.clear();
+    
+    // 清理定时器
+    if (this.hideChartTimer) {
+      clearTimeout(this.hideChartTimer);
+      this.hideChartTimer = null;
+    }
+    
+    // 重置状态
+    this.state.volumeHistory = [];
+    this.state.volumeDetectionEnabled = false;
+    this.state.isVolumeBoosted = false;
+    
+    console.log('[SpeedControl] 资源清理完成');
   }
 }
 
