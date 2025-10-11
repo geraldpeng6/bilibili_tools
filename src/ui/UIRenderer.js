@@ -7,6 +7,7 @@ import { ICONS } from './styles.js';
 import state from '../state/StateManager.js';
 import { formatTime } from '../utils/helpers.js';
 import config from '../config/ConfigManager.js';
+import { AI_API_KEY_URLS } from '../constants.js';
 
 class UIRenderer {
   /**
@@ -20,7 +21,15 @@ class UIRenderer {
 
     let html = `
       <div class="subtitle-header">
-        <span>视频字幕</span>
+        <div class="subtitle-search-container">
+          <span class="search-icon">🔍</span>
+          <input type="text" class="search-input" placeholder="搜索内容..." id="subtitle-search-input">
+          <div class="search-nav">
+            <span class="search-counter" id="search-counter">0/0</span>
+            <button class="search-nav-btn search-prev" id="search-prev" title="上一个">↑</button>
+            <button class="search-nav-btn search-next" id="search-next" title="下一个">↓</button>
+          </div>
+        </div>
         <div class="subtitle-header-actions">
           <span class="ai-icon ${state.ai.isSummarizing ? 'loading' : ''}" title="AI 总结">
             ${ICONS.AI}
@@ -196,10 +205,15 @@ class UIRenderer {
           <span>AI 配置管理</span>
         </div>
         <div class="config-modal-body">
-          <div style="margin-bottom: 20px; padding: 15px; background: rgba(254, 235, 234, 0.1); border-radius: 10px; border-left: 4px solid #feebea;">
-            <div style="font-size: 13px; color: #fff; font-weight: 600; margin-bottom: 4px;">使用提示</div>
-            <div style="font-size: 12px; color: rgba(255, 255, 255, 0.7); line-height: 1.5;">
-              点击配置卡片直接查看和编辑，修改后保存即更新。点击「新建配置」创建新配置。
+          <div style="margin-bottom: 20px; padding: 15px; background: linear-gradient(135deg, rgba(255, 107, 107, 0.15), rgba(255, 77, 77, 0.15)); border-radius: 10px; border-left: 4px solid #ff6b6b;">
+            <div style="font-size: 14px; color: #fff; font-weight: 600; margin-bottom: 8px;">⚠️ 首次使用必读</div>
+            <div style="font-size: 12px; color: rgba(255, 255, 255, 0.9); line-height: 1.6; margin-bottom: 8px;">
+              • 使用AI总结功能前，需要先配置API Key<br>
+              • 选择一个AI服务商，点击查看其配置，填写API Key后保存<br>
+              • 推荐使用 <strong>OpenRouter</strong>、<strong>DeepSeek</strong> 或 <strong>硅基流动</strong>（提供免费额度）
+            </div>
+            <div style="font-size: 11px; color: rgba(255, 255, 255, 0.6); margin-top: 8px;">
+              💡 提示：点击配置卡片可查看详情和获取API Key的教程链接
             </div>
           </div>
           <div class="ai-config-list" id="ai-config-list"></div>
@@ -216,7 +230,7 @@ class UIRenderer {
             <input type="text" id="ai-config-url" placeholder="https://api.openai.com/v1/chat/completions">
           </div>
           <div class="config-field">
-            <label>API Key</label>
+            <label>API Key <span id="api-key-help-link" style="font-size: 11px; margin-left: 8px;"></span></label>
             <input type="password" id="ai-config-apikey" placeholder="sk-...">
           </div>
           <div class="config-field">
@@ -269,14 +283,26 @@ class UIRenderer {
     const configs = config.getAIConfigs();
     const selectedId = config.getSelectedAIConfigId();
 
-    listElement.innerHTML = configs.map(cfg => `
-      <div class="ai-config-item ${cfg.id === selectedId ? 'selected' : ''}" data-id="${cfg.id}">
-        <div class="ai-config-item-name">${cfg.name}</div>
-        <div class="ai-config-item-actions">
-          <button class="ai-config-btn-small config-btn-primary ai-edit-btn" data-id="${cfg.id}">编辑</button>
+    listElement.innerHTML = configs.map(cfg => {
+      const hasApiKey = cfg.apiKey && cfg.apiKey.trim() !== '';
+      const statusIcon = hasApiKey ? '✅' : '⚠️';
+      const statusText = hasApiKey ? '已配置' : '未配置';
+      const statusColor = hasApiKey ? '#4ade80' : '#fbbf24';
+      
+      return `
+        <div class="ai-config-item ${cfg.id === selectedId ? 'selected' : ''}" data-id="${cfg.id}">
+          <div class="ai-config-item-name">
+            ${cfg.name}
+            <span style="font-size: 11px; color: ${statusColor}; margin-left: 8px;" title="API Key ${statusText}">
+              ${statusIcon} ${statusText}
+            </span>
+          </div>
+          <div class="ai-config-item-actions">
+            <button class="ai-config-btn-small config-btn-primary ai-edit-btn" data-id="${cfg.id}">查看</button>
+          </div>
         </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
   }
 
   /**

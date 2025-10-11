@@ -13,7 +13,7 @@ import speedControlService from '../services/SpeedControlService.js';
 import notification from './Notification.js';
 import uiRenderer from './UIRenderer.js';
 import notesPanel from './NotesPanel.js';
-import { SELECTORS } from '../constants.js';
+import { SELECTORS, AI_API_KEY_URLS } from '../constants.js';
 
 class EventHandlers {
   constructor() {
@@ -27,6 +27,10 @@ class EventHandlers {
     this.resizeStartY = 0;
     this.resizeStartWidth = 0;
     this.resizeStartHeight = 0;
+    // Search related state
+    this.searchMatches = [];
+    this.currentMatchIndex = -1;
+    this.searchTerm = '';
   }
 
   /**
@@ -94,8 +98,36 @@ class EventHandlers {
     const listContainer = container.querySelector('#subtitle-list-container');
     if (toggleBtn && listContainer) {
       toggleBtn.addEventListener('click', () => {
+        const wasExpanded = listContainer.classList.contains('expanded');
         listContainer.classList.toggle('expanded');
         toggleBtn.classList.toggle('expanded');
+        
+        // 如果是从收起变为展开，则自动滚动到当前播放的字幕
+        if (!wasExpanded) {
+          this.scrollToCurrentSubtitle(container);
+        }
+      });
+    }
+
+    // 搜索输入框
+    const searchInput = container.querySelector('#subtitle-search-input');
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        this.handleSearch(container, e.target.value);
+      });
+    }
+
+    // 搜索导航按钮
+    const prevBtn = container.querySelector('#search-prev');
+    const nextBtn = container.querySelector('#search-next');
+    if (prevBtn) {
+      prevBtn.addEventListener('click', () => {
+        this.navigateSearch(container, -1);
+      });
+    }
+    if (nextBtn) {
+      nextBtn.addEventListener('click', () => {
+        this.navigateSearch(container, 1);
       });
     }
 
@@ -150,11 +182,12 @@ class EventHandlers {
     if (!header) return;
 
     header.addEventListener('mousedown', (e) => {
-      // 如果点击的是按钮，不触发拖拽
+      // 如果点击的是按钮或搜索框，不触发拖拽
       if (e.target.closest('.subtitle-close') || 
           e.target.closest('.ai-icon') || 
           e.target.closest('.download-icon') || 
-          e.target.closest('.notion-icon')) {
+          e.target.closest('.notion-icon') ||
+          e.target.closest('.subtitle-search-container')) {
         return;
       }
 
@@ -325,6 +358,207 @@ class EventHandlers {
   }
 
   /**
+   * 滚动到当前播放的字幕
+   * @param {HTMLElement} container - 字幕容器
+   */
+  scrollToCurrentSubtitle(container) {
+    setTimeout(() => {
+      const video = document.querySelector(SELECTORS.VIDEO);
+      if (!video) return;
+
+      const currentTime = video.currentTime;
+      const items = container.querySelectorAll('.subtitle-item');
+
+      for (const item of items) {
+        const from = parseFloat(item.dataset.from);
+        const to = parseFloat(item.dataset.to);
+
+        if (currentTime >= from && currentTime <= to) {
+          item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          break;
+        }
+      }
+    }, 100);
+  }
+
+  /**
+   * 处理搜索
+   * @param {HTMLElement} container - 字幕容器
+   * @param {string} searchTerm - 搜索词
+   */
+  handleSearch(container, searchTerm) {
+    this.searchTerm = searchTerm.trim();
+    
+    // 清除之前的高亮
+    this.clearSearchHighlights(container);
+    
+    if (!this.searchTerm) {
+      this.updateSearchCounter(0, 0);
+      return;
+    }
+
+    // 在AI总结和字幕中搜索并高亮
+    this.searchMatches = [];
+    this.highlightSearchInContainer(container);
+    
+    // 更新计数器
+    this.updateSearchCounter(
+      this.searchMatches.length > 0 ? 1 : 0,
+      this.searchMatches.length
+    );
+    
+    // 如果有匹配，跳转到第一个
+    if (this.searchMatches.length > 0) {
+      this.currentMatchIndex = 0;
+      this.scrollToMatch(this.searchMatches[0]);
+    }
+  }
+
+  /**
+   * 在容器中高亮搜索词
+   * @param {HTMLElement} container - 字幕容器
+   */
+  highlightSearchInContainer(container) {
+    const contentDiv = container.querySelector('.subtitle-content');
+    if (!contentDiv) return;
+
+    // 搜索AI总结
+    const summarySection = contentDiv.querySelector('.ai-summary-section');
+    if (summarySection) {
+      const summaryContent = summarySection.querySelector('.ai-summary-content');
+      if (summaryContent) {
+        this.highlightInElement(summaryContent, this.searchTerm);
+      }
+    }
+
+    // 搜索字幕
+    const subtitleItems = contentDiv.querySelectorAll('.subtitle-item');
+    subtitleItems.forEach(item => {
+      const textElement = item.querySelector('.subtitle-text');
+      if (textElement) {
+        this.highlightInElement(textElement, this.searchTerm);
+      }
+    });
+  }
+
+  /**
+   * 在元素中高亮搜索词
+   * @param {HTMLElement} element - 目标元素
+   * @param {string} searchTerm - 搜索词
+   */
+  highlightInElement(element, searchTerm) {
+    const originalText = element.textContent;
+    const regex = new RegExp(`(${this.escapeRegex(searchTerm)})`, 'gi');
+    const matches = originalText.match(regex);
+    
+    if (matches) {
+      let highlightedHTML = originalText.replace(regex, (match) => {
+        return `<mark class="search-highlight" data-search-match>${match}</mark>`;
+      });
+      
+      element.innerHTML = highlightedHTML;
+      
+      // 收集所有匹配元素
+      const markElements = element.querySelectorAll('mark[data-search-match]');
+      markElements.forEach(mark => {
+        this.searchMatches.push(mark);
+      });
+    }
+  }
+
+  /**
+   * 转义正则表达式特殊字符
+   * @param {string} str - 字符串
+   * @returns {string}
+   */
+  escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /**
+   * 清除搜索高亮
+   * @param {HTMLElement} container - 字幕容器
+   */
+  clearSearchHighlights(container) {
+    const marks = container.querySelectorAll('mark[data-search-match]');
+    marks.forEach(mark => {
+      const text = mark.textContent;
+      const textNode = document.createTextNode(text);
+      mark.parentNode.replaceChild(textNode, mark);
+    });
+    
+    this.searchMatches = [];
+    this.currentMatchIndex = -1;
+  }
+
+  /**
+   * 导航搜索结果
+   * @param {HTMLElement} container - 字幕容器
+   * @param {number} direction - 方向 (1: 下一个, -1: 上一个)
+   */
+  navigateSearch(container, direction) {
+    if (this.searchMatches.length === 0) return;
+
+    // 移除当前高亮
+    if (this.currentMatchIndex >= 0 && this.currentMatchIndex < this.searchMatches.length) {
+      this.searchMatches[this.currentMatchIndex].classList.remove('search-highlight-current');
+      this.searchMatches[this.currentMatchIndex].classList.add('search-highlight');
+    }
+
+    // 更新索引
+    this.currentMatchIndex += direction;
+    
+    // 循环
+    if (this.currentMatchIndex >= this.searchMatches.length) {
+      this.currentMatchIndex = 0;
+    } else if (this.currentMatchIndex < 0) {
+      this.currentMatchIndex = this.searchMatches.length - 1;
+    }
+
+    // 高亮当前匹配
+    const currentMatch = this.searchMatches[this.currentMatchIndex];
+    currentMatch.classList.remove('search-highlight');
+    currentMatch.classList.add('search-highlight-current');
+
+    // 滚动到当前匹配
+    this.scrollToMatch(currentMatch);
+
+    // 更新计数器
+    this.updateSearchCounter(this.currentMatchIndex + 1, this.searchMatches.length);
+  }
+
+  /**
+   * 滚动到匹配项
+   * @param {HTMLElement} element - 匹配元素
+   */
+  scrollToMatch(element) {
+    element.classList.add('search-highlight-current');
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  /**
+   * 更新搜索计数器
+   * @param {number} current - 当前索引
+   * @param {number} total - 总数
+   */
+  updateSearchCounter(current, total) {
+    const counter = document.getElementById('search-counter');
+    if (counter) {
+      counter.textContent = `${current}/${total}`;
+    }
+
+    const prevBtn = document.getElementById('search-prev');
+    const nextBtn = document.getElementById('search-next');
+    
+    if (prevBtn) {
+      prevBtn.disabled = total === 0;
+    }
+    if (nextBtn) {
+      nextBtn.disabled = total === 0;
+    }
+  }
+
+  /**
    * 显示AI配置模态框
    */
   showAIConfigModal() {
@@ -378,10 +612,11 @@ class EventHandlers {
     const saveNewBtn = document.getElementById('ai-save-new-btn');
     const updateBtn = document.getElementById('ai-update-btn');
     const modelSelectWrapper = document.getElementById('model-select-wrapper');
+    const apiKeyHelpLink = document.getElementById('api-key-help-link');
 
     if (nameEl) nameEl.value = '';
     if (urlEl) urlEl.value = 'https://openrouter.ai/api/v1/chat/completions';
-    if (apikeyEl) apikeyEl.value = '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';
+    if (apikeyEl) apikeyEl.value = '';
     if (modelEl) modelEl.value = 'alibaba/tongyi-deepresearch-30b-a3b:free';
     if (promptEl) promptEl.value = `请用中文总结以下视频字幕内容，使用Markdown格式输出。
 
@@ -396,6 +631,7 @@ class EventHandlers {
     if (saveNewBtn) saveNewBtn.style.display = '';
     if (updateBtn) updateBtn.style.display = 'none';
     if (modelSelectWrapper) modelSelectWrapper.style.display = 'none';
+    if (apiKeyHelpLink) apiKeyHelpLink.innerHTML = '';
   }
 
   /**
@@ -554,6 +790,14 @@ class EventHandlers {
     if (modelEl) modelEl.value = cfg.model;
     if (promptEl) promptEl.value = cfg.prompt;
     if (openrouterEl) openrouterEl.checked = cfg.isOpenRouter || false;
+
+    // 显示API Key获取链接
+    const apiKeyHelpLink = document.getElementById('api-key-help-link');
+    if (apiKeyHelpLink && AI_API_KEY_URLS[cfg.id]) {
+      apiKeyHelpLink.innerHTML = `<a href="${AI_API_KEY_URLS[cfg.id]}" target="_blank" style="color: #60a5fa; text-decoration: none;">📖 如何获取API Key?</a>`;
+    } else if (apiKeyHelpLink) {
+      apiKeyHelpLink.innerHTML = '';
+    }
 
     // 显示更新按钮
     if (saveNewBtn) saveNewBtn.style.display = 'none';

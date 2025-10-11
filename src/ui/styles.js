@@ -100,6 +100,101 @@ export const CSS_STYLES = `
     color: #fff;
     border-radius: 16px 16px 0 0;
     user-select: none;
+    gap: 12px;
+  }
+
+  .subtitle-search-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+    padding: 6px 10px;
+    border: 1px solid rgba(254, 235, 234, 0.2);
+    transition: all 0.2s;
+  }
+
+  .subtitle-search-container:focus-within {
+    border-color: #feebea;
+    background: rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 0 2px rgba(254, 235, 234, 0.1);
+  }
+
+  .search-icon {
+    font-size: 16px;
+    opacity: 0.7;
+  }
+
+  .search-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #fff;
+    font-size: 14px;
+    padding: 4px;
+  }
+
+  .search-input::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .search-nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .search-counter {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    min-width: 36px;
+    text-align: center;
+  }
+
+  .search-nav-btn {
+    background: rgba(254, 235, 234, 0.2);
+    border: 1px solid rgba(254, 235, 234, 0.3);
+    border-radius: 4px;
+    color: #fff;
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 14px;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .search-nav-btn:hover {
+    background: rgba(254, 235, 234, 0.35);
+    border-color: #feebea;
+  }
+
+  .search-nav-btn:active {
+    transform: scale(0.95);
+  }
+
+  .search-nav-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  /* 搜索高亮样式 */
+  .search-highlight {
+    background-color: rgba(255, 255, 0, 0.4);
+    color: #000;
+    padding: 2px 0;
+    border-radius: 2px;
+  }
+
+  .search-highlight-current {
+    background-color: rgba(255, 165, 0, 0.6);
+    color: #000;
+    padding: 2px 0;
+    border-radius: 2px;
+    box-shadow: 0 0 4px rgba(255, 165, 0, 0.8);
   }
 
   .subtitle-header-actions {
@@ -1846,14 +1941,14 @@ export function injectStyles() {
 // SVG图标
 export const ICONS = {
   AI: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M3 21L12 12L12.2 6.2L11 5M15 4V2M15 16V14M8 9H10M20 9H22M17.8 11.8L19 13M17.8 6.2L19 5" stroke="#2d2d2d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="12" cy="12" r="1.5" fill="#2d2d2d"/>
-    <path d="M17 7L12 12L7 7" stroke="#2d2d2d" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
+    <path d="M3 21L12 12L12.2 6.2L11 5M15 4V2M15 16V14M8 9H10M20 9H22M17.8 11.8L19 13M17.8 6.2L19 5" stroke="#feebea" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="12" cy="12" r="1.5" fill="#feebea"/>
+    <path d="M17 7L12 12L7 7" stroke="#feebea" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
   </svg>`,
   
   DOWNLOAD: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M12 3V16M12 16L7 11M12 16L17 11" stroke="#2d2d2d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M3 17V19C3 20.1046 3.89543 21 5 21H19C20.1046 21 21 20.1046 21 19V17" stroke="#2d2d2d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M12 3V16M12 16L7 11M12 16L17 11" stroke="#feebea" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M3 17V19C3 20.1046 3.89543 21 5 21H19C20.1046 21 21 20.1046 21 19V17" stroke="#feebea" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`,
   
   NOTION: `<svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">

@@ -48,17 +48,21 @@ class AIService {
     try {
       const aiConfig = config.getSelectedAIConfig();
       
-      if (!aiConfig || !aiConfig.apiKey) {
-        throw new Error('请先配置 AI API Key');
+      if (!aiConfig) {
+        throw new Error('未找到AI配置，请先在设置中添加配置');
+      }
+
+      if (!aiConfig.apiKey || aiConfig.apiKey.trim() === '') {
+        throw new Error('请先配置 AI API Key\n\n请点击右上角设置按钮，选择"AI配置"，然后为所选的AI服务商配置API Key');
       }
 
       // 验证配置
       if (!aiConfig.url || !aiConfig.url.startsWith('http')) {
-        throw new Error('API URL格式错误');
+        throw new Error('API URL格式错误，请在设置中检查配置');
       }
 
-      if (!aiConfig.model) {
-        throw new Error('未配置模型');
+      if (!aiConfig.model || aiConfig.model.trim() === '') {
+        throw new Error('未配置模型，请在设置中选择AI模型');
       }
 
       // 生成字幕文本

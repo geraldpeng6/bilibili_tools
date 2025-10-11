@@ -78,12 +78,25 @@ const DEFAULT_PROMPT = `请用中文总结以下视频字幕内容，使用Markd
 字幕内容：
 `;
 
+// AI服务商API Key获取链接
+export const AI_API_KEY_URLS = {
+  'openrouter': 'https://openrouter.ai/keys',
+  'openai': 'https://platform.openai.com/api-keys',
+  'siliconflow': 'https://cloud.siliconflow.cn/account/ak',
+  'deepseek': 'https://platform.deepseek.com/api_keys',
+  'moonshot': 'https://platform.moonshot.cn/console/api-keys',
+  'zhipu': 'https://open.bigmodel.cn/usercenter/apikeys',
+  'yi': 'https://platform.lingyiwanwu.com/apikeys',
+  'dashscope': 'https://bailian.console.aliyun.com/',
+  'gemini': 'https://aistudio.google.com/app/apikey'
+};
+
 export const AI_DEFAULT_CONFIGS = [
   {
     id: 'openrouter',
     name: 'OpenRouter',
     url: 'https://openrouter.ai/api/v1/chat/completions',
-    apiKey: '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',
+    apiKey: '',
     model: 'alibaba/tongyi-deepresearch-30b-a3b:free',
     prompt: DEFAULT_PROMPT,
     isOpenRouter: true

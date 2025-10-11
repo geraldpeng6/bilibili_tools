@@ -108,12 +108,25 @@
 字幕内容：
 `;
 
+  // AI服务商API Key获取链接
+  const AI_API_KEY_URLS = {
+    'openrouter': 'https://openrouter.ai/keys',
+    'openai': 'https://platform.openai.com/api-keys',
+    'siliconflow': 'https://cloud.siliconflow.cn/account/ak',
+    'deepseek': 'https://platform.deepseek.com/api_keys',
+    'moonshot': 'https://platform.moonshot.cn/console/api-keys',
+    'zhipu': 'https://open.bigmodel.cn/usercenter/apikeys',
+    'yi': 'https://platform.lingyiwanwu.com/apikeys',
+    'dashscope': 'https://bailian.console.aliyun.com/',
+    'gemini': 'https://aistudio.google.com/app/apikey'
+  };
+
   const AI_DEFAULT_CONFIGS = [
     {
       id: 'openrouter',
       name: 'OpenRouter',
       url: 'https://openrouter.ai/api/v1/chat/completions',
-      apiKey: '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',
+      apiKey: '',
       model: 'alibaba/tongyi-deepresearch-30b-a3b:free',
       prompt: DEFAULT_PROMPT,
       isOpenRouter: true
@@ -372,6 +385,101 @@
     color: #fff;
     border-radius: 16px 16px 0 0;
     user-select: none;
+    gap: 12px;
+  }
+
+  .subtitle-search-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+    padding: 6px 10px;
+    border: 1px solid rgba(254, 235, 234, 0.2);
+    transition: all 0.2s;
+  }
+
+  .subtitle-search-container:focus-within {
+    border-color: #feebea;
+    background: rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 0 2px rgba(254, 235, 234, 0.1);
+  }
+
+  .search-icon {
+    font-size: 16px;
+    opacity: 0.7;
+  }
+
+  .search-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #fff;
+    font-size: 14px;
+    padding: 4px;
+  }
+
+  .search-input::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .search-nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .search-counter {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    min-width: 36px;
+    text-align: center;
+  }
+
+  .search-nav-btn {
+    background: rgba(254, 235, 234, 0.2);
+    border: 1px solid rgba(254, 235, 234, 0.3);
+    border-radius: 4px;
+    color: #fff;
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 14px;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .search-nav-btn:hover {
+    background: rgba(254, 235, 234, 0.35);
+    border-color: #feebea;
+  }
+
+  .search-nav-btn:active {
+    transform: scale(0.95);
+  }
+
+  .search-nav-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  /* 搜索高亮样式 */
+  .search-highlight {
+    background-color: rgba(255, 255, 0, 0.4);
+    color: #000;
+    padding: 2px 0;
+    border-radius: 2px;
+  }
+
+  .search-highlight-current {
+    background-color: rgba(255, 165, 0, 0.6);
+    color: #000;
+    padding: 2px 0;
+    border-radius: 2px;
+    box-shadow: 0 0 4px rgba(255, 165, 0, 0.8);
   }
 
   .subtitle-header-actions {
@@ -2118,14 +2226,14 @@
   // SVG图标
   const ICONS = {
     AI: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M3 21L12 12L12.2 6.2L11 5M15 4V2M15 16V14M8 9H10M20 9H22M17.8 11.8L19 13M17.8 6.2L19 5" stroke="#2d2d2d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="12" cy="12" r="1.5" fill="#2d2d2d"/>
-    <path d="M17 7L12 12L7 7" stroke="#2d2d2d" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
+    <path d="M3 21L12 12L12.2 6.2L11 5M15 4V2M15 16V14M8 9H10M20 9H22M17.8 11.8L19 13M17.8 6.2L19 5" stroke="#feebea" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="12" cy="12" r="1.5" fill="#feebea"/>
+    <path d="M17 7L12 12L7 7" stroke="#feebea" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
   </svg>`,
     
     DOWNLOAD: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M12 3V16M12 16L7 11M12 16L17 11" stroke="#2d2d2d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M3 17V19C3 20.1046 3.89543 21 5 21H19C20.1046 21 21 20.1046 21 19V17" stroke="#2d2d2d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M12 3V16M12 16L7 11M12 16L17 11" stroke="#feebea" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M3 17V19C3 20.1046 3.89543 21 5 21H19C20.1046 21 21 20.1046 21 19V17" stroke="#feebea" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`,
     
     NOTION: `<svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -3419,17 +3527,21 @@
       try {
         const aiConfig = config.getSelectedAIConfig();
         
-        if (!aiConfig || !aiConfig.apiKey) {
-          throw new Error('请先配置 AI API Key');
+        if (!aiConfig) {
+          throw new Error('未找到AI配置，请先在设置中添加配置');
+        }
+
+        if (!aiConfig.apiKey || aiConfig.apiKey.trim() === '') {
+          throw new Error('请先配置 AI API Key\n\n请点击右上角设置按钮，选择"AI配置"，然后为所选的AI服务商配置API Key');
         }
 
         // 验证配置
         if (!aiConfig.url || !aiConfig.url.startsWith('http')) {
-          throw new Error('API URL格式错误');
+          throw new Error('API URL格式错误，请在设置中检查配置');
         }
 
-        if (!aiConfig.model) {
-          throw new Error('未配置模型');
+        if (!aiConfig.model || aiConfig.model.trim() === '') {
+          throw new Error('未配置模型，请在设置中选择AI模型');
         }
 
         // 生成字幕文本
@@ -6308,7 +6420,15 @@
 
       let html = `
       <div class="subtitle-header">
-        <span>视频字幕</span>
+        <div class="subtitle-search-container">
+          <span class="search-icon">🔍</span>
+          <input type="text" class="search-input" placeholder="搜索内容..." id="subtitle-search-input">
+          <div class="search-nav">
+            <span class="search-counter" id="search-counter">0/0</span>
+            <button class="search-nav-btn search-prev" id="search-prev" title="上一个">↑</button>
+            <button class="search-nav-btn search-next" id="search-next" title="下一个">↓</button>
+          </div>
+        </div>
         <div class="subtitle-header-actions">
           <span class="ai-icon ${state.ai.isSummarizing ? 'loading' : ''}" title="AI 总结">
             ${ICONS.AI}
@@ -6484,10 +6604,15 @@
           <span>AI 配置管理</span>
         </div>
         <div class="config-modal-body">
-          <div style="margin-bottom: 20px; padding: 15px; background: rgba(254, 235, 234, 0.1); border-radius: 10px; border-left: 4px solid #feebea;">
-            <div style="font-size: 13px; color: #fff; font-weight: 600; margin-bottom: 4px;">使用提示</div>
-            <div style="font-size: 12px; color: rgba(255, 255, 255, 0.7); line-height: 1.5;">
-              点击配置卡片直接查看和编辑，修改后保存即更新。点击「新建配置」创建新配置。
+          <div style="margin-bottom: 20px; padding: 15px; background: linear-gradient(135deg, rgba(255, 107, 107, 0.15), rgba(255, 77, 77, 0.15)); border-radius: 10px; border-left: 4px solid #ff6b6b;">
+            <div style="font-size: 14px; color: #fff; font-weight: 600; margin-bottom: 8px;">⚠️ 首次使用必读</div>
+            <div style="font-size: 12px; color: rgba(255, 255, 255, 0.9); line-height: 1.6; margin-bottom: 8px;">
+              • 使用AI总结功能前，需要先配置API Key<br>
+              • 选择一个AI服务商，点击查看其配置，填写API Key后保存<br>
+              • 推荐使用 <strong>OpenRouter</strong>、<strong>DeepSeek</strong> 或 <strong>硅基流动</strong>（提供免费额度）
+            </div>
+            <div style="font-size: 11px; color: rgba(255, 255, 255, 0.6); margin-top: 8px;">
+              💡 提示：点击配置卡片可查看详情和获取API Key的教程链接
             </div>
           </div>
           <div class="ai-config-list" id="ai-config-list"></div>
@@ -6504,7 +6629,7 @@
             <input type="text" id="ai-config-url" placeholder="https://api.openai.com/v1/chat/completions">
           </div>
           <div class="config-field">
-            <label>API Key</label>
+            <label>API Key <span id="api-key-help-link" style="font-size: 11px; margin-left: 8px;"></span></label>
             <input type="password" id="ai-config-apikey" placeholder="sk-...">
           </div>
           <div class="config-field">
@@ -6557,14 +6682,26 @@
       const configs = config.getAIConfigs();
       const selectedId = config.getSelectedAIConfigId();
 
-      listElement.innerHTML = configs.map(cfg => `
-      <div class="ai-config-item ${cfg.id === selectedId ? 'selected' : ''}" data-id="${cfg.id}">
-        <div class="ai-config-item-name">${cfg.name}</div>
-        <div class="ai-config-item-actions">
-          <button class="ai-config-btn-small config-btn-primary ai-edit-btn" data-id="${cfg.id}">编辑</button>
+      listElement.innerHTML = configs.map(cfg => {
+        const hasApiKey = cfg.apiKey && cfg.apiKey.trim() !== '';
+        const statusIcon = hasApiKey ? '✅' : '⚠️';
+        const statusText = hasApiKey ? '已配置' : '未配置';
+        const statusColor = hasApiKey ? '#4ade80' : '#fbbf24';
+        
+        return `
+        <div class="ai-config-item ${cfg.id === selectedId ? 'selected' : ''}" data-id="${cfg.id}">
+          <div class="ai-config-item-name">
+            ${cfg.name}
+            <span style="font-size: 11px; color: ${statusColor}; margin-left: 8px;" title="API Key ${statusText}">
+              ${statusIcon} ${statusText}
+            </span>
+          </div>
+          <div class="ai-config-item-actions">
+            <button class="ai-config-btn-small config-btn-primary ai-edit-btn" data-id="${cfg.id}">查看</button>
+          </div>
         </div>
-      </div>
-    `).join('');
+      `;
+      }).join('');
     }
 
     /**
@@ -6896,6 +7033,10 @@
       this.resizeStartY = 0;
       this.resizeStartWidth = 0;
       this.resizeStartHeight = 0;
+      // Search related state
+      this.searchMatches = [];
+      this.currentMatchIndex = -1;
+      this.searchTerm = '';
     }
 
     /**
@@ -6963,8 +7104,36 @@
       const listContainer = container.querySelector('#subtitle-list-container');
       if (toggleBtn && listContainer) {
         toggleBtn.addEventListener('click', () => {
+          const wasExpanded = listContainer.classList.contains('expanded');
           listContainer.classList.toggle('expanded');
           toggleBtn.classList.toggle('expanded');
+          
+          // 如果是从收起变为展开，则自动滚动到当前播放的字幕
+          if (!wasExpanded) {
+            this.scrollToCurrentSubtitle(container);
+          }
+        });
+      }
+
+      // 搜索输入框
+      const searchInput = container.querySelector('#subtitle-search-input');
+      if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+          this.handleSearch(container, e.target.value);
+        });
+      }
+
+      // 搜索导航按钮
+      const prevBtn = container.querySelector('#search-prev');
+      const nextBtn = container.querySelector('#search-next');
+      if (prevBtn) {
+        prevBtn.addEventListener('click', () => {
+          this.navigateSearch(container, -1);
+        });
+      }
+      if (nextBtn) {
+        nextBtn.addEventListener('click', () => {
+          this.navigateSearch(container, 1);
         });
       }
 
@@ -7019,11 +7188,12 @@
       if (!header) return;
 
       header.addEventListener('mousedown', (e) => {
-        // 如果点击的是按钮，不触发拖拽
+        // 如果点击的是按钮或搜索框，不触发拖拽
         if (e.target.closest('.subtitle-close') || 
             e.target.closest('.ai-icon') || 
             e.target.closest('.download-icon') || 
-            e.target.closest('.notion-icon')) {
+            e.target.closest('.notion-icon') ||
+            e.target.closest('.subtitle-search-container')) {
           return;
         }
 
@@ -7194,6 +7364,207 @@
     }
 
     /**
+     * 滚动到当前播放的字幕
+     * @param {HTMLElement} container - 字幕容器
+     */
+    scrollToCurrentSubtitle(container) {
+      setTimeout(() => {
+        const video = document.querySelector(SELECTORS.VIDEO);
+        if (!video) return;
+
+        const currentTime = video.currentTime;
+        const items = container.querySelectorAll('.subtitle-item');
+
+        for (const item of items) {
+          const from = parseFloat(item.dataset.from);
+          const to = parseFloat(item.dataset.to);
+
+          if (currentTime >= from && currentTime <= to) {
+            item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            break;
+          }
+        }
+      }, 100);
+    }
+
+    /**
+     * 处理搜索
+     * @param {HTMLElement} container - 字幕容器
+     * @param {string} searchTerm - 搜索词
+     */
+    handleSearch(container, searchTerm) {
+      this.searchTerm = searchTerm.trim();
+      
+      // 清除之前的高亮
+      this.clearSearchHighlights(container);
+      
+      if (!this.searchTerm) {
+        this.updateSearchCounter(0, 0);
+        return;
+      }
+
+      // 在AI总结和字幕中搜索并高亮
+      this.searchMatches = [];
+      this.highlightSearchInContainer(container);
+      
+      // 更新计数器
+      this.updateSearchCounter(
+        this.searchMatches.length > 0 ? 1 : 0,
+        this.searchMatches.length
+      );
+      
+      // 如果有匹配，跳转到第一个
+      if (this.searchMatches.length > 0) {
+        this.currentMatchIndex = 0;
+        this.scrollToMatch(this.searchMatches[0]);
+      }
+    }
+
+    /**
+     * 在容器中高亮搜索词
+     * @param {HTMLElement} container - 字幕容器
+     */
+    highlightSearchInContainer(container) {
+      const contentDiv = container.querySelector('.subtitle-content');
+      if (!contentDiv) return;
+
+      // 搜索AI总结
+      const summarySection = contentDiv.querySelector('.ai-summary-section');
+      if (summarySection) {
+        const summaryContent = summarySection.querySelector('.ai-summary-content');
+        if (summaryContent) {
+          this.highlightInElement(summaryContent, this.searchTerm);
+        }
+      }
+
+      // 搜索字幕
+      const subtitleItems = contentDiv.querySelectorAll('.subtitle-item');
+      subtitleItems.forEach(item => {
+        const textElement = item.querySelector('.subtitle-text');
+        if (textElement) {
+          this.highlightInElement(textElement, this.searchTerm);
+        }
+      });
+    }
+
+    /**
+     * 在元素中高亮搜索词
+     * @param {HTMLElement} element - 目标元素
+     * @param {string} searchTerm - 搜索词
+     */
+    highlightInElement(element, searchTerm) {
+      const originalText = element.textContent;
+      const regex = new RegExp(`(${this.escapeRegex(searchTerm)})`, 'gi');
+      const matches = originalText.match(regex);
+      
+      if (matches) {
+        let highlightedHTML = originalText.replace(regex, (match) => {
+          return `<mark class="search-highlight" data-search-match>${match}</mark>`;
+        });
+        
+        element.innerHTML = highlightedHTML;
+        
+        // 收集所有匹配元素
+        const markElements = element.querySelectorAll('mark[data-search-match]');
+        markElements.forEach(mark => {
+          this.searchMatches.push(mark);
+        });
+      }
+    }
+
+    /**
+     * 转义正则表达式特殊字符
+     * @param {string} str - 字符串
+     * @returns {string}
+     */
+    escapeRegex(str) {
+      return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    /**
+     * 清除搜索高亮
+     * @param {HTMLElement} container - 字幕容器
+     */
+    clearSearchHighlights(container) {
+      const marks = container.querySelectorAll('mark[data-search-match]');
+      marks.forEach(mark => {
+        const text = mark.textContent;
+        const textNode = document.createTextNode(text);
+        mark.parentNode.replaceChild(textNode, mark);
+      });
+      
+      this.searchMatches = [];
+      this.currentMatchIndex = -1;
+    }
+
+    /**
+     * 导航搜索结果
+     * @param {HTMLElement} container - 字幕容器
+     * @param {number} direction - 方向 (1: 下一个, -1: 上一个)
+     */
+    navigateSearch(container, direction) {
+      if (this.searchMatches.length === 0) return;
+
+      // 移除当前高亮
+      if (this.currentMatchIndex >= 0 && this.currentMatchIndex < this.searchMatches.length) {
+        this.searchMatches[this.currentMatchIndex].classList.remove('search-highlight-current');
+        this.searchMatches[this.currentMatchIndex].classList.add('search-highlight');
+      }
+
+      // 更新索引
+      this.currentMatchIndex += direction;
+      
+      // 循环
+      if (this.currentMatchIndex >= this.searchMatches.length) {
+        this.currentMatchIndex = 0;
+      } else if (this.currentMatchIndex < 0) {
+        this.currentMatchIndex = this.searchMatches.length - 1;
+      }
+
+      // 高亮当前匹配
+      const currentMatch = this.searchMatches[this.currentMatchIndex];
+      currentMatch.classList.remove('search-highlight');
+      currentMatch.classList.add('search-highlight-current');
+
+      // 滚动到当前匹配
+      this.scrollToMatch(currentMatch);
+
+      // 更新计数器
+      this.updateSearchCounter(this.currentMatchIndex + 1, this.searchMatches.length);
+    }
+
+    /**
+     * 滚动到匹配项
+     * @param {HTMLElement} element - 匹配元素
+     */
+    scrollToMatch(element) {
+      element.classList.add('search-highlight-current');
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    /**
+     * 更新搜索计数器
+     * @param {number} current - 当前索引
+     * @param {number} total - 总数
+     */
+    updateSearchCounter(current, total) {
+      const counter = document.getElementById('search-counter');
+      if (counter) {
+        counter.textContent = `${current}/${total}`;
+      }
+
+      const prevBtn = document.getElementById('search-prev');
+      const nextBtn = document.getElementById('search-next');
+      
+      if (prevBtn) {
+        prevBtn.disabled = total === 0;
+      }
+      if (nextBtn) {
+        nextBtn.disabled = total === 0;
+      }
+    }
+
+    /**
      * 显示AI配置模态框
      */
     showAIConfigModal() {
@@ -7247,10 +7618,11 @@
       const saveNewBtn = document.getElementById('ai-save-new-btn');
       const updateBtn = document.getElementById('ai-update-btn');
       const modelSelectWrapper = document.getElementById('model-select-wrapper');
+      const apiKeyHelpLink = document.getElementById('api-key-help-link');
 
       if (nameEl) nameEl.value = '';
       if (urlEl) urlEl.value = 'https://openrouter.ai/api/v1/chat/completions';
-      if (apikeyEl) apikeyEl.value = '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';
+      if (apikeyEl) apikeyEl.value = '';
       if (modelEl) modelEl.value = 'alibaba/tongyi-deepresearch-30b-a3b:free';
       if (promptEl) promptEl.value = `请用中文总结以下视频字幕内容，使用Markdown格式输出。
 
@@ -7265,6 +7637,7 @@
       if (saveNewBtn) saveNewBtn.style.display = '';
       if (updateBtn) updateBtn.style.display = 'none';
       if (modelSelectWrapper) modelSelectWrapper.style.display = 'none';
+      if (apiKeyHelpLink) apiKeyHelpLink.innerHTML = '';
     }
 
     /**
@@ -7423,6 +7796,14 @@
       if (modelEl) modelEl.value = cfg.model;
       if (promptEl) promptEl.value = cfg.prompt;
       if (openrouterEl) openrouterEl.checked = cfg.isOpenRouter || false;
+
+      // 显示API Key获取链接
+      const apiKeyHelpLink = document.getElementById('api-key-help-link');
+      if (apiKeyHelpLink && AI_API_KEY_URLS[cfg.id]) {
+        apiKeyHelpLink.innerHTML = `<a href="${AI_API_KEY_URLS[cfg.id]}" target="_blank" style="color: #60a5fa; text-decoration: none;">📖 如何获取API Key?</a>`;
+      } else if (apiKeyHelpLink) {
+        apiKeyHelpLink.innerHTML = '';
+      }
 
       // 显示更新按钮
       if (saveNewBtn) saveNewBtn.style.display = 'none';
