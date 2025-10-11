@@ -1107,6 +1107,7 @@ export const CSS_STYLES = `
     transform: translate(-50%, -50%);
     width: 600px;
     max-width: 90%;
+    height: 80vh;
     max-height: 80vh;
     background: rgba(0, 0, 0, 0.85);
     backdrop-filter: blur(12px);
