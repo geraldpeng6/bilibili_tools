@@ -1272,6 +1272,23 @@ export const CSS_STYLES = `
     color: #c0392b;
   }
 
+  /* ==================== 笔记选择保存点样式 ==================== */
+  #note-saver-blue-dot {
+    position: absolute;
+    cursor: pointer;
+    z-index: 2147483647; /* Maximum z-index */
+    display: none;
+    transition: transform 0.2s, filter 0.2s;
+    pointer-events: auto !important;
+    width: 24px;
+    height: 24px;
+  }
+
+  #note-saver-blue-dot:hover {
+    transform: scale(1.15);
+    filter: drop-shadow(0 2px 4px rgba(254, 235, 234, 0.5));
+  }
+
   /* ==================== 字幕项保存按钮样式 ==================== */
   .subtitle-item-header {
     display: flex;
