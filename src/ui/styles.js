@@ -80,16 +80,17 @@ export const CSS_STYLES = `
   /* ==================== 字幕容器样式 ==================== */
   #subtitle-container {
     position: fixed;
-    top: 0;
+    top: 10px;
     right: 0;
+    bottom: 10px;
     width: auto;
     min-width: 420px;
     max-width: calc(100vw - 1200px);
-    height: 100vh;
+    height: auto;
     background: rgba(0, 0, 0, 0.85);
     backdrop-filter: blur(12px);
     color: #fff;
-    border-radius: 0;
+    border-radius: 12px 0 0 12px;
     font-size: 14px;
     line-height: 1.8;
     display: none;
