@@ -55,8 +55,8 @@ export const CSS_STYLES = `
   }
 
   @keyframes breath-ball {
-    0%, 100% { transform: translateY(-50%) scale(1); opacity: 1; }
-    50% { transform: translateY(-50%) scale(1.15); opacity: 0.7; }
+    0%, 100% { transform: translateY(-50%) scale(1.1); opacity: 1; }
+    50% { transform: translateY(-50%) scale(1.4); opacity: 0.6; }
   }
 
   /* ==================== 字幕容器样式 ==================== */
@@ -347,8 +347,8 @@ export const CSS_STYLES = `
   }
 
   @keyframes breath-ai {
-    0%, 100% { transform: scale(1); opacity: 1; }
-    50% { transform: scale(1.2); opacity: 0.6; }
+    0%, 100% { transform: scale(1.05); opacity: 1; }
+    50% { transform: scale(1.35); opacity: 0.5; }
   }
 
   /* ==================== 下载图标样式 ==================== */
@@ -384,8 +384,8 @@ export const CSS_STYLES = `
   }
 
   @keyframes breath-notion {
-    0%, 100% { transform: scale(1); opacity: 1; }
-    50% { transform: scale(1.2); opacity: 0.6; }
+    0%, 100% { transform: scale(1.05); opacity: 1; }
+    50% { transform: scale(1.35); opacity: 0.5; }
   }
 
   /* ==================== Toast提示样式 ==================== */
@@ -1544,6 +1544,15 @@ export const CSS_STYLES = `
     z-index: 2;
     font-weight: 500;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  
+  /* 只显示emoji的标签样式 */
+  .bili-quality-tag.emoji-only,
+  .bili-ad-tag.emoji-only {
+    padding: 3px 8px !important;
+    min-width: auto;
   }
 
   /* 视频卡片标签位置 */
@@ -1578,8 +1587,10 @@ export const CSS_STYLES = `
   /* 多标签容器 */
   .bili-tags-container {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 4px;
+    overflow: visible;
+    align-items: center;
   }
 
   @keyframes badgeSlideIn {

@@ -340,8 +340,8 @@
   }
 
   @keyframes breath-ball {
-    0%, 100% { transform: translateY(-50%) scale(1); opacity: 1; }
-    50% { transform: translateY(-50%) scale(1.15); opacity: 0.7; }
+    0%, 100% { transform: translateY(-50%) scale(1.1); opacity: 1; }
+    50% { transform: translateY(-50%) scale(1.4); opacity: 0.6; }
   }
 
   /* ==================== 字幕容器样式 ==================== */
@@ -632,8 +632,8 @@
   }
 
   @keyframes breath-ai {
-    0%, 100% { transform: scale(1); opacity: 1; }
-    50% { transform: scale(1.2); opacity: 0.6; }
+    0%, 100% { transform: scale(1.05); opacity: 1; }
+    50% { transform: scale(1.35); opacity: 0.5; }
   }
 
   /* ==================== 下载图标样式 ==================== */
@@ -669,8 +669,8 @@
   }
 
   @keyframes breath-notion {
-    0%, 100% { transform: scale(1); opacity: 1; }
-    50% { transform: scale(1.2); opacity: 0.6; }
+    0%, 100% { transform: scale(1.05); opacity: 1; }
+    50% { transform: scale(1.35); opacity: 0.5; }
   }
 
   /* ==================== Toast提示样式 ==================== */
@@ -1829,6 +1829,15 @@
     z-index: 2;
     font-weight: 500;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  
+  /* 只显示emoji的标签样式 */
+  .bili-quality-tag.emoji-only,
+  .bili-ad-tag.emoji-only {
+    padding: 3px 8px !important;
+    min-width: auto;
   }
 
   /* 视频卡片标签位置 */
@@ -1863,8 +1872,10 @@
   /* 多标签容器 */
   .bili-tags-container {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 4px;
+    overflow: visible;
+    align-items: center;
   }
 
   @keyframes badgeSlideIn {
@@ -6068,17 +6079,30 @@
         const tagsContainer = document.createElement('div');
         tagsContainer.className = 'bili-tags-container';
 
+        // 先收集所有标签
+        const allBadges = [];
+        
         // 添加优质视频标签
         if (sponsorBlockConfig.get('showQualityBadge') && stats && this.isHighQuality(stats)) {
-          const qualityBadge = this.createQualityBadge(stats);
-          tagsContainer.appendChild(qualityBadge);
+          allBadges.push(this.createQualityBadge(stats));
         }
 
         // 添加片段标签
         if (sponsorBlockConfig.get('showAdBadge') && segments && segments.length > 0) {
-          const badges = this.createSegmentBadges(segments);
-          badges.forEach(badge => tagsContainer.appendChild(badge));
+          const segmentBadges = this.createSegmentBadges(segments);
+          allBadges.push(...segmentBadges);
         }
+
+        // 如果标签数量 >= 3，设置为只显示emoji模式
+        const emojiOnly = allBadges.length >= 3;
+        
+        allBadges.forEach(badge => {
+          if (emojiOnly && badge.dataset.emoji && badge.dataset.text) {
+            badge.textContent = badge.dataset.emoji;
+            badge.classList.add('emoji-only');
+          }
+          tagsContainer.appendChild(badge);
+        });
 
         // 如果有标签，插入到容器中
         if (tagsContainer.children.length > 0) {
@@ -6141,9 +6165,15 @@
       if (this.isTopQuality(stats)) {
         badge.style.background = SPONSORBLOCK.TOP_TAG_COLOR;
         badge.textContent = SPONSORBLOCK.TOP_TAG_TEXT;
+        badge.dataset.emoji = '🏆';
+        badge.dataset.text = '顶级';
+        badge.title = '顶级优质视频';
       } else {
         badge.style.background = SPONSORBLOCK.TAG_COLOR;
         badge.textContent = SPONSORBLOCK.TAG_TEXT;
+        badge.dataset.emoji = '🔥';
+        badge.dataset.text = '精选';
+        badge.title = '精选优质视频';
       }
       return badge;
     }
@@ -6183,10 +6213,17 @@
         const badge = document.createElement('span');
         badge.className = 'bili-ad-tag';
         badge.style.background = style.color;
+        
+        // 保存emoji和文本信息，用于后续判断是否只显示emoji
+        badge.dataset.emoji = count > 1 ? `${style.icon}×${count}` : style.icon;
+        badge.dataset.text = style.text;
+        
+        // 默认显示完整内容
         badge.textContent = `${style.icon} ${style.text}`;
         if (count > 1) {
           badge.textContent += ` (${count})`;
         }
+        
         badge.title = `包含 ${count} 个${style.text}片段`;
         badges.push(badge);
       });
@@ -7120,6 +7157,14 @@
       if (searchInput) {
         searchInput.addEventListener('input', (e) => {
           this.handleSearch(container, e.target.value);
+        });
+        
+        // 回车键循环跳转到下一个匹配项
+        searchInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault(); // 阻止默认行为
+            this.navigateSearch(container, 1); // 跳转到下一个匹配项
+          }
         });
       }
 

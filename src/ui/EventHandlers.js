@@ -115,6 +115,14 @@ class EventHandlers {
       searchInput.addEventListener('input', (e) => {
         this.handleSearch(container, e.target.value);
       });
+      
+      // 回车键循环跳转到下一个匹配项
+      searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault(); // 阻止默认行为
+          this.navigateSearch(container, 1); // 跳转到下一个匹配项
+        }
+      });
     }
 
     // 搜索导航按钮
