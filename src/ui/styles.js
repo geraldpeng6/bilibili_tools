@@ -99,7 +99,7 @@ export const CSS_STYLES = `
     border: 1px solid rgba(254, 235, 234, 0.2);
     border-right: none;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    z-index: ${Z_INDEX.CONTAINER - 1};
+    z-index: ${Z_INDEX.CONTAINER};
   }
 
   #subtitle-container.show {
