@@ -339,9 +339,22 @@ class NotesService {
               
               console.log(`[NotesService] 选择范围矩形数量: ${rects.length}`);
               
+              // 如果 getClientRects() 返回空数组，使用 getBoundingClientRect() 作为后备
               if (rects.length === 0) {
-                console.warn('[NotesService] ⚠ 没有选择范围矩形，隐藏保存点');
-                this.hideBlueDot();
+                console.log('[NotesService] ⚠ getClientRects() 返回空，使用 getBoundingClientRect() 作为后备');
+                const boundingRect = range.getBoundingClientRect();
+                
+                if (boundingRect.width === 0 && boundingRect.height === 0) {
+                  console.warn('[NotesService] ⚠ getBoundingClientRect() 也返回空矩形，隐藏保存点');
+                  this.hideBlueDot();
+                  return;
+                }
+                
+                // 使用包围盒的右下角作为默认位置
+                const x = boundingRect.right + window.scrollX + 5;
+                const y = boundingRect.bottom + window.scrollY + 5;
+                console.log(`[NotesService] 使用包围盒位置: x=${x}, y=${y}`);
+                this.showBlueDot(x, y);
                 return;
               }
 
