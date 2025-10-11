@@ -1,0 +1,312 @@
+/**
+ * 状态管理模块
+ * 集中管理应用的所有状态，解决全局变量散乱和竞态条件问题
+ */
+
+import { BALL_STATUS } from '../constants.js';
+import { generateCacheKey, validateVideoInfo } from '../utils/validators.js';
+import eventBus from '../utils/EventBus.js';
+import { EVENTS } from '../constants.js';
+
+class StateManager {
+  constructor() {
+    this.reset();
+  }
+
+  /**
+   * 重置所有状态
+   * 解决"状态重置不完整"的问题
+   */
+  reset() {
+    // 字幕相关状态
+    this.subtitle = {
+      data: null,                    // 当前字幕数据
+      cache: {},                     // 字幕缓存 {videoKey: subtitleData}
+      capturedUrl: null,             // 捕获到的字幕URL
+    };
+
+    // 请求相关状态（解决竞态条件）
+    this.request = {
+      isRequesting: false,           // 是否正在请求
+      currentRequestKey: null,       // 当前请求的视频key
+      requestPromise: null,          // 当前请求的Promise
+      abortController: null,         // 用于取消请求
+    };
+
+    // AI相关状态
+    this.ai = {
+      isSummarizing: false,          // 是否正在生成总结
+      currentSummary: null,          // 当前总结内容
+      summaryPromise: null,          // 总结Promise
+      abortController: null,         // 用于取消AI总结
+    };
+
+    // Notion相关状态
+    this.notion = {
+      isSending: false,              // 是否正在发送
+      sendPromise: null,             // 发送Promise
+    };
+
+    // UI相关状态
+    this.ui = {
+      ballStatus: BALL_STATUS.IDLE,  // 小球状态
+      panelVisible: false,           // 面板是否可见
+      isDragging: false,             // 是否正在拖拽
+      dragStart: { x: 0, y: 0 },     // 拖拽起始位置
+      panelStart: { x: 0, y: 0 },    // 面板起始位置
+    };
+
+    // 视频相关状态
+    this.video = {
+      bvid: null,                    // 当前视频BV号
+      cid: null,                     // 当前视频CID
+      aid: null,                     // 当前视频AID
+    };
+  }
+
+  /**
+   * 更新视频信息
+   * @param {{bvid: string, cid: string|number, aid: string|number}} videoInfo
+   */
+  setVideoInfo(videoInfo) {
+    const validation = validateVideoInfo(videoInfo);
+    if (!validation.valid) {
+      return false;
+    }
+
+    this.video.bvid = videoInfo.bvid;
+    this.video.cid = videoInfo.cid;
+    this.video.aid = videoInfo.aid;
+
+    return true;
+  }
+
+  /**
+   * 获取当前视频信息
+   * @returns {{bvid: string, cid: string|number, aid: string|number}}
+   */
+  getVideoInfo() {
+    return { ...this.video };
+  }
+
+  /**
+   * 生成当前视频的缓存键
+   * @returns {string|null}
+   */
+  getVideoKey() {
+    return generateCacheKey(this.video);
+  }
+
+  /**
+   * 设置字幕数据（同时更新缓存）
+   * @param {Array} data - 字幕数据
+   */
+  setSubtitleData(data) {
+    this.subtitle.data = data;
+    
+    // 更新缓存
+    const videoKey = this.getVideoKey();
+    if (videoKey) {
+      this.subtitle.cache[videoKey] = data;
+    }
+    
+    // 触发事件
+    if (data && data.length > 0) {
+      eventBus.emit(EVENTS.SUBTITLE_LOADED, data, videoKey);
+    }
+  }
+
+  /**
+   * 获取字幕数据（优先从缓存）
+   * @param {string|null} videoKey - 视频键，不传则使用当前视频
+   * @returns {Array|null}
+   */
+  getSubtitleData(videoKey = null) {
+    const key = videoKey || this.getVideoKey();
+    
+    if (!key) {
+      return this.subtitle.data;
+    }
+    
+    // 优先从缓存获取
+    if (this.subtitle.cache[key]) {
+      return this.subtitle.cache[key];
+    }
+    
+    // 如果是当前视频，返回当前数据
+    if (key === this.getVideoKey()) {
+      return this.subtitle.data;
+    }
+    
+    return null;
+  }
+
+  /**
+   * 开始请求（原子操作，解决竞态条件）
+   * @returns {{success: boolean, reason: string|null}}
+   */
+  startRequest() {
+    const videoKey = this.getVideoKey();
+    
+    if (!videoKey) {
+      return { success: false, reason: '视频信息无效' };
+    }
+
+    // 检查是否正在请求相同的视频
+    if (this.request.isRequesting && this.request.currentRequestKey === videoKey) {
+      return { success: false, reason: '已有相同视频的请求在进行中' };
+    }
+
+    // 检查缓存
+    if (this.subtitle.cache[videoKey]) {
+      return { success: false, reason: '已有缓存' };
+    }
+
+    // 如果正在请求其他视频，取消旧请求
+    if (this.request.isRequesting) {
+      this.cancelRequest();
+    }
+
+    // 开始新请求
+    this.request.isRequesting = true;
+    this.request.currentRequestKey = videoKey;
+    
+    return { success: true, reason: null };
+  }
+
+  /**
+   * 完成请求
+   */
+  finishRequest() {
+    this.request.isRequesting = false;
+    this.request.currentRequestKey = null;
+    this.request.requestPromise = null;
+    this.request.abortController = null;
+  }
+
+  /**
+   * 取消当前请求
+   */
+  cancelRequest() {
+    if (this.request.abortController) {
+      this.request.abortController.abort();
+    }
+    this.finishRequest();
+  }
+
+  /**
+   * 开始AI总结
+   * @returns {boolean}
+   */
+  startAISummary() {
+    if (this.ai.isSummarizing) {
+      return false;
+    }
+
+    this.ai.isSummarizing = true;
+    this.ai.abortController = new AbortController();
+    eventBus.emit(EVENTS.AI_SUMMARY_START);
+    
+    return true;
+  }
+
+  /**
+   * 完成AI总结
+   * @param {string} summary - 总结内容
+   */
+  finishAISummary(summary) {
+    this.ai.isSummarizing = false;
+    this.ai.currentSummary = summary;
+    this.ai.summaryPromise = null;
+    this.ai.abortController = null;
+    
+    // 保存到sessionStorage
+    const videoKey = this.getVideoKey();
+    if (videoKey && summary) {
+      sessionStorage.setItem(`ai-summary-${videoKey}`, summary);
+    }
+    
+    eventBus.emit(EVENTS.AI_SUMMARY_COMPLETE, summary, videoKey);
+  }
+
+  /**
+   * 取消AI总结
+   */
+  cancelAISummary() {
+    if (this.ai.abortController) {
+      this.ai.abortController.abort();
+    }
+    this.ai.isSummarizing = false;
+    this.ai.summaryPromise = null;
+    this.ai.abortController = null;
+  }
+
+  /**
+   * 获取AI总结（优先从缓存）
+   * @param {string|null} videoKey - 视频键
+   * @returns {string|null}
+   */
+  getAISummary(videoKey = null) {
+    const key = videoKey || this.getVideoKey();
+    
+    if (!key) {
+      return this.ai.currentSummary;
+    }
+    
+    // 从sessionStorage获取
+    const cached = sessionStorage.getItem(`ai-summary-${key}`);
+    if (cached) {
+      return cached;
+    }
+    
+    // 如果是当前视频，返回当前总结
+    if (key === this.getVideoKey()) {
+      return this.ai.currentSummary;
+    }
+    
+    return null;
+  }
+
+  /**
+   * 更新小球状态
+   * @param {string} status - 状态值
+   */
+  setBallStatus(status) {
+    if (this.ui.ballStatus !== status) {
+      this.ui.ballStatus = status;
+      eventBus.emit(EVENTS.UI_BALL_STATUS_CHANGE, status);
+    }
+  }
+
+  /**
+   * 获取小球状态
+   * @returns {string}
+   */
+  getBallStatus() {
+    return this.ui.ballStatus;
+  }
+
+  /**
+   * 切换面板显示状态
+   */
+  togglePanel() {
+    this.ui.panelVisible = !this.ui.panelVisible;
+    eventBus.emit(EVENTS.UI_PANEL_TOGGLE, this.ui.panelVisible);
+  }
+
+  /**
+   * 设置面板显示状态
+   * @param {boolean} visible
+   */
+  setPanelVisible(visible) {
+    if (this.ui.panelVisible !== visible) {
+      this.ui.panelVisible = visible;
+      eventBus.emit(EVENTS.UI_PANEL_TOGGLE, visible);
+    }
+  }
+}
+
+// 创建全局单例
+export const state = new StateManager();
+export default state;
+

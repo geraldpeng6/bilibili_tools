@@ -1,0 +1,299 @@
+/**
+ * UI渲染模块
+ * 负责生成所有UI元素的HTML
+ */
+
+import { ICONS } from './styles.js';
+import state from '../state/StateManager.js';
+import { formatTime } from '../utils/helpers.js';
+import config from '../config/ConfigManager.js';
+
+class UIRenderer {
+  /**
+   * 渲染字幕面板
+   * @param {Array} subtitleData - 字幕数据
+   * @returns {string} - HTML字符串
+   */
+  renderSubtitlePanel(subtitleData) {
+    const videoKey = state.getVideoKey();
+    const cachedSummary = videoKey ? state.getAISummary(videoKey) : null;
+
+    let html = `
+      <div class="subtitle-header">
+        <span>视频字幕</span>
+        <div class="subtitle-header-actions">
+          <span class="ai-icon ${state.ai.isSummarizing ? 'loading' : ''}" title="AI 总结">
+            ${ICONS.AI}
+          </span>
+          <span class="download-icon" title="下载字幕">
+            ${ICONS.DOWNLOAD}
+          </span>
+          <span class="notion-icon ${state.notion.isSending ? 'loading' : ''}" title="发送到 Notion">
+            ${ICONS.NOTION}
+          </span>
+          <span class="subtitle-close">×</span>
+        </div>
+      </div>
+      <div class="subtitle-content">
+        <button class="subtitle-toggle-btn" id="subtitle-toggle-btn" title="展开/收起字幕列表 (${subtitleData.length}条)">
+          <span class="subtitle-toggle-icon">►</span>
+        </button>
+        <div class="subtitle-list-container" id="subtitle-list-container">
+    `;
+
+    // 渲染字幕列表
+    subtitleData.forEach((item, index) => {
+      const startTime = formatTime(item.from);
+      html += `
+        <div class="subtitle-item" data-index="${index}" data-from="${item.from}" data-to="${item.to}">
+          <div class="subtitle-item-header">
+            <div class="subtitle-time">${startTime}</div>
+            <button class="save-subtitle-note-btn" data-content="${this.escapeHtml(item.content)}" title="保存为笔记">保存</button>
+          </div>
+          <div class="subtitle-text">${item.content}</div>
+        </div>
+      `;
+    });
+
+    html += `
+        </div>
+      </div>
+    `;
+
+    return html;
+  }
+
+  /**
+   * HTML转义
+   * @param {string} text - 要转义的文本
+   * @returns {string} 转义后的文本
+   */
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  /**
+   * 渲染AI总结区域
+   * @param {string} summary - 总结内容（Markdown格式）
+   * @param {boolean} isLoading - 是否正在加载
+   * @returns {HTMLElement} - DOM元素
+   */
+  renderAISummarySection(summary = null, isLoading = false) {
+    const section = document.createElement('div');
+    section.className = 'ai-summary-section';
+
+    if (isLoading) {
+      section.innerHTML = `
+        <div class="ai-summary-title">
+          <span>✨ AI 视频总结</span>
+        </div>
+        <div class="ai-summary-content ai-summary-loading">正在生成总结...</div>
+      `;
+    } else if (summary) {
+      section.innerHTML = `
+        <div class="ai-summary-title">
+          <span>✨ AI 视频总结</span>
+        </div>
+        <div class="ai-summary-content">${marked.parse(summary)}</div>
+      `;
+    }
+
+    return section;
+  }
+
+  /**
+   * 更新AI总结内容
+   * @param {HTMLElement} container - 字幕容器元素
+   * @param {string} summary - 总结内容
+   */
+  updateAISummary(container, summary) {
+    const contentDiv = container.querySelector('.subtitle-content');
+    if (!contentDiv) return;
+
+    let summarySection = contentDiv.querySelector('.ai-summary-section');
+
+    if (!summarySection) {
+      summarySection = this.renderAISummarySection(summary);
+      contentDiv.insertBefore(summarySection, contentDiv.firstChild);
+    } else {
+      const summaryContent = summarySection.querySelector('.ai-summary-content');
+      if (summaryContent) {
+        summaryContent.classList.remove('ai-summary-loading');
+        summaryContent.innerHTML = marked.parse(summary);
+      }
+    }
+  }
+
+  /**
+   * 创建Notion配置模态框
+   * @returns {HTMLElement}
+   */
+  createNotionConfigModal() {
+    const modal = document.createElement('div');
+    modal.id = 'notion-config-modal';
+    modal.className = 'config-modal';
+    modal.innerHTML = `
+      <div class="config-modal-content">
+        <div class="config-modal-header">
+          <span>Notion 集成配置</span>
+        </div>
+        <div class="config-modal-body">
+          <div class="config-field">
+            <label>1️⃣ Notion API Key</label>
+            <input type="password" id="notion-api-key" placeholder="输入你的 Integration Token">
+            <div class="config-help">
+              访问 <a href="https://www.notion.so/my-integrations" target="_blank">Notion Integrations</a> 创建 Integration 并复制 Token
+            </div>
+          </div>
+          <div class="config-field">
+            <label>2️⃣ 目标位置（二选一）</label>
+            <input type="text" id="notion-parent-page-id" placeholder="Page ID 或 Database ID">
+            <div class="config-help">
+              <strong>方式A - 使用已有数据库：</strong><br>
+              从数据库 URL 中获取：<code>notion.so/<strong>abc123...</strong>?v=...</code><br>
+              脚本会直接向该数据库添加记录
+            </div>
+            <div class="config-help" style="margin-top: 8px;">
+              <strong>方式B - 自动创建数据库：</strong><br>
+              从页面 URL 中获取：<code>notion.so/My-Page-<strong>abc123...</strong></code><br>
+              首次使用会在此页面下创建数据库
+            </div>
+            <div class="config-help" style="margin-top: 8px; color: #f59e0b;">
+              ⚠️ 重要：需要在「Share」中邀请你的 Integration
+            </div>
+          </div>
+        <div class="config-field">
+          <label>
+            <input type="checkbox" id="notion-auto-send-enabled">
+            自动发送（获取字幕后自动发送到Notion）
+          </label>
+        </div>
+          <div id="notion-status-message"></div>
+        </div>
+        <div class="config-footer">
+          <button class="config-btn config-btn-secondary" id="notion-cancel-btn">取消</button>
+          <button class="config-btn config-btn-primary" id="notion-save-btn">保存配置</button>
+        </div>
+      </div>
+    `;
+
+    return modal;
+  }
+
+  /**
+   * 创建AI配置模态框
+   * @returns {HTMLElement}
+   */
+  createAIConfigModal() {
+    const modal = document.createElement('div');
+    modal.id = 'ai-config-modal';
+    modal.className = 'config-modal';
+    modal.innerHTML = `
+      <div class="config-modal-content">
+        <div class="config-modal-header">
+          <span>AI 配置管理</span>
+        </div>
+        <div class="config-modal-body">
+          <div style="margin-bottom: 20px; padding: 15px; background: rgba(254, 235, 234, 0.1); border-radius: 10px; border-left: 4px solid #feebea;">
+            <div style="font-size: 13px; color: #fff; font-weight: 600; margin-bottom: 4px;">使用提示</div>
+            <div style="font-size: 12px; color: rgba(255, 255, 255, 0.7); line-height: 1.5;">
+              点击配置卡片直接查看和编辑，修改后保存即更新。点击「新建配置」创建新配置。
+            </div>
+          </div>
+          <div class="ai-config-list" id="ai-config-list"></div>
+          <div style="margin-bottom: 15px; text-align: center;">
+            <button class="config-btn config-btn-secondary" id="ai-new-config-btn" style="padding: 8px 16px; font-size: 13px;">新建配置</button>
+          </div>
+          <div class="ai-config-form hidden">
+          <div class="config-field">
+            <label>配置名称</label>
+            <input type="text" id="ai-config-name" placeholder="例如：OpenAI GPT-4">
+          </div>
+          <div class="config-field">
+            <label>API URL</label>
+            <input type="text" id="ai-config-url" placeholder="https://api.openai.com/v1/chat/completions">
+          </div>
+          <div class="config-field">
+            <label>API Key</label>
+            <input type="password" id="ai-config-apikey" placeholder="sk-...">
+          </div>
+          <div class="config-field">
+            <label>模型</label>
+            <div class="model-field-with-button">
+              <input type="text" id="ai-config-model" placeholder="手动输入或点击获取模型">
+              <button class="fetch-models-btn" id="fetch-models-btn">获取模型</button>
+            </div>
+            <div class="model-select-wrapper" id="model-select-wrapper" style="display:none;">
+              <input type="text" id="model-search-input" class="model-search-input" placeholder="🔍 搜索模型...">
+              <select id="model-select" size="8"></select>
+            </div>
+          </div>
+          <div class="config-field">
+            <label>
+              <input type="checkbox" id="ai-config-is-openrouter">
+              使用OpenRouter (支持获取模型列表)
+            </label>
+          </div>
+          <div class="config-field">
+            <label>提示词 (Prompt)</label>
+            <textarea id="ai-config-prompt" placeholder="根据以下视频字幕，用中文总结视频内容："></textarea>
+          </div>
+          <div class="config-field">
+            <label>
+              <input type="checkbox" id="ai-auto-summary-enabled">
+              自动总结（获取字幕后自动触发AI总结）
+            </label>
+          </div>
+          </div>
+        </div>
+        <div class="config-footer">
+          <button class="config-btn config-btn-danger" id="ai-delete-current-btn" style="display:none;">删除此配置</button>
+          <div style="flex: 1;"></div>
+          <button class="config-btn config-btn-secondary" id="ai-cancel-btn">取消</button>
+          <button class="config-btn config-btn-primary" id="ai-save-new-btn">添加新配置</button>
+          <button class="config-btn config-btn-primary" id="ai-update-btn" style="display:none;">更新配置</button>
+        </div>
+      </div>
+    `;
+
+    return modal;
+  }
+
+  /**
+   * 渲染AI配置列表
+   * @param {HTMLElement} listElement - 列表容器元素
+   */
+  renderAIConfigList(listElement) {
+    const configs = config.getAIConfigs();
+    const selectedId = config.getSelectedAIConfigId();
+
+    listElement.innerHTML = configs.map(cfg => `
+      <div class="ai-config-item ${cfg.id === selectedId ? 'selected' : ''}" data-id="${cfg.id}">
+        <div class="ai-config-item-name">${cfg.name}</div>
+        <div class="ai-config-item-actions">
+          <button class="ai-config-btn-small config-btn-primary ai-edit-btn" data-id="${cfg.id}">编辑</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  /**
+   * 显示Notion配置状态
+   * @param {string} message - 消息内容
+   * @param {boolean} isError - 是否为错误
+   */
+  showNotionStatus(message, isError = false) {
+    const statusEl = document.getElementById('notion-status-message');
+    if (statusEl) {
+      statusEl.className = `config-status ${isError ? 'error' : 'success'}`;
+      statusEl.textContent = message;
+    }
+  }
+}
+
+// 创建全局单例
+export const uiRenderer = new UIRenderer();
+export default uiRenderer;
+

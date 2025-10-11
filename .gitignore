@@ -1,0 +1,7 @@
+node_modules/
+# dist/ - 保留用于 Greasyfork 同步
+*.log
+.DS_Store
+.vscode/
+.idea/
+

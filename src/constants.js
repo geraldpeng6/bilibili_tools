@@ -1,0 +1,259 @@
+/**
+ * 常量定义模块
+ * 集中管理所有魔法数字和配置常量
+ */
+
+// ==================== 时间相关常量 ====================
+export const TIMING = {
+  // 检测间隔
+  CHECK_SUBTITLE_INTERVAL: 500,        // 检测字幕按钮的间隔 (ms)
+  CHECK_MAX_ATTEMPTS: 20,              // 最多检测次数（10秒）
+  
+  // 延迟时间
+  SUBTITLE_ACTIVATION_DELAY: 1500,    // 激活字幕的延迟
+  SUBTITLE_CAPTURE_DELAY: 500,        // 捕获字幕的延迟
+  MENU_OPEN_DELAY: 500,               // 打开菜单的延迟
+  CLOSE_SUBTITLE_DELAY: 100,          // 关闭字幕显示的延迟
+  VIDEO_SWITCH_DELAY: 2000,           // 视频切换后的延迟
+  AUTO_ACTIONS_DELAY: 500,            // 自动操作的延迟
+  
+  // 超时时间
+  AI_SUMMARY_TIMEOUT: 120000,         // AI总结超时 (2分钟)
+  NOTION_SEND_TIMEOUT: 30000,         // Notion发送超时 (30秒)
+  
+  // Toast显示时间
+  TOAST_DURATION: 2000,               // Toast默认显示时间
+};
+
+// ==================== 文本长度限制 ====================
+export const LIMITS = {
+  NOTION_TEXT_CHUNK: 1900,            // Notion单个text对象的最大长度（留安全余量）
+  NOTION_TEXT_MAX: 2000,              // Notion官方限制
+  NOTION_PAGE_ID_LENGTH: 32,          // Notion Page ID的标准长度
+};
+
+// ==================== 状态类型 ====================
+export const BALL_STATUS = {
+  IDLE: 'idle',                       // 初始状态
+  LOADING: 'loading',                 // 加载中
+  ACTIVE: 'active',                   // 有字幕，可点击
+  NO_SUBTITLE: 'no-subtitle',         // 无字幕
+  ERROR: 'error',                     // 错误
+};
+
+// ==================== 事件类型 ====================
+export const EVENTS = {
+  // 字幕相关
+  SUBTITLE_LOADED: 'subtitle:loaded',
+  SUBTITLE_FAILED: 'subtitle:failed',
+  SUBTITLE_REQUESTED: 'subtitle:requested',
+  
+  // AI相关
+  AI_SUMMARY_START: 'ai:summary:start',
+  AI_SUMMARY_COMPLETE: 'ai:summary:complete',
+  AI_SUMMARY_FAILED: 'ai:summary:failed',
+  AI_SUMMARY_CHUNK: 'ai:summary:chunk',
+  
+  // Notion相关
+  NOTION_SEND_START: 'notion:send:start',
+  NOTION_SEND_COMPLETE: 'notion:send:complete',
+  NOTION_SEND_FAILED: 'notion:send:failed',
+  
+  // UI相关
+  UI_PANEL_TOGGLE: 'ui:panel:toggle',
+  UI_BALL_STATUS_CHANGE: 'ui:ball:status:change',
+  
+  // 视频相关
+  VIDEO_CHANGED: 'video:changed',
+};
+
+// ==================== AI默认配置 ====================
+const DEFAULT_PROMPT = `请用中文总结以下视频字幕内容，使用Markdown格式输出。
+
+要求：
+1. 在开头提供TL;DR（不超过50字的核心摘要）
+2. 使用标题、列表等Markdown格式组织内容
+3. 突出关键信息和要点
+
+字幕内容：
+`;
+
+export const AI_DEFAULT_CONFIGS = [
+  {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    url: 'https://openrouter.ai/api/v1/chat/completions',
+    apiKey: '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',
+    model: 'alibaba/tongyi-deepresearch-30b-a3b:free',
+    prompt: DEFAULT_PROMPT,
+    isOpenRouter: true
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI',
+    url: 'https://api.openai.com/v1/chat/completions',
+    apiKey: '',
+    model: 'gpt-3.5-turbo',
+    prompt: DEFAULT_PROMPT,
+    isOpenRouter: false
+  },
+  {
+    id: 'siliconflow',
+    name: '硅基流动',
+    url: 'https://api.siliconflow.cn/v1/chat/completions',
+    apiKey: '',
+    model: 'Qwen/Qwen2.5-7B-Instruct',
+    prompt: DEFAULT_PROMPT,
+    isOpenRouter: false
+  },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    url: 'https://api.deepseek.com/v1/chat/completions',
+    apiKey: '',
+    model: 'deepseek-chat',
+    prompt: DEFAULT_PROMPT,
+    isOpenRouter: false
+  },
+  {
+    id: 'moonshot',
+    name: '月之暗面 Kimi',
+    url: 'https://api.moonshot.cn/v1/chat/completions',
+    apiKey: '',
+    model: 'moonshot-v1-8k',
+    prompt: DEFAULT_PROMPT,
+    isOpenRouter: false
+  },
+  {
+    id: 'zhipu',
+    name: '智谱AI',
+    url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+    apiKey: '',
+    model: 'glm-4-flash',
+    prompt: DEFAULT_PROMPT,
+    isOpenRouter: false
+  },
+  {
+    id: 'yi',
+    name: '零一万物',
+    url: 'https://api.lingyiwanwu.com/v1/chat/completions',
+    apiKey: '',
+    model: 'yi-large',
+    prompt: DEFAULT_PROMPT,
+    isOpenRouter: false
+  },
+  {
+    id: 'dashscope',
+    name: '阿里云百炼',
+    url: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+    apiKey: '',
+    model: 'qwen-plus',
+    prompt: DEFAULT_PROMPT,
+    isOpenRouter: false
+  },
+  {
+    id: 'gemini',
+    name: 'Google Gemini',
+    url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    apiKey: '',
+    model: 'gemini-1.5-flash',
+    prompt: DEFAULT_PROMPT,
+    isOpenRouter: false
+  }
+];
+
+// ==================== 存储键名 ====================
+export const STORAGE_KEYS = {
+  AI_CONFIGS: 'ai_configs',
+  AI_SELECTED_ID: 'selected_ai_config_id',
+  AI_AUTO_SUMMARY: 'ai_auto_summary_enabled',
+  
+  NOTION_API_KEY: 'notion_api_key',
+  NOTION_PARENT_PAGE_ID: 'notion_parent_page_id',
+  NOTION_DATABASE_ID: 'notion_database_id',
+  NOTION_AUTO_SEND: 'notion_auto_send_enabled',
+};
+
+// ==================== Z-Index层级 ====================
+export const Z_INDEX = {
+  BALL: 2147483647,                   // 最高层
+  CONTAINER: 2147483646,              // 次高层
+  TOAST: 2147483645,                  // Toast层
+  NOTION_MODAL: 2147483644,           // Notion模态框
+  AI_MODAL: 2147483643,               // AI模态框
+};
+
+// ==================== CSS类名 ====================
+export const CSS_CLASSES = {
+  BALL: 'subtitle-ball',
+  CONTAINER: 'subtitle-container',
+  LOADING: 'loading',
+  ACTIVE: 'active',
+  SHOW: 'show',
+  EXPANDED: 'expanded',
+  CURRENT: 'current',
+};
+
+// ==================== API相关 ====================
+export const API = {
+  NOTION_VERSION: '2022-06-28',
+  NOTION_BASE_URL: 'https://api.notion.com/v1',
+};
+
+// ==================== 正则表达式 ====================
+export const REGEX = {
+  BVID_FROM_PATH: /\/video\/(BV[1-9A-Za-z]{10})/,
+  BVID_FROM_URL: /BV[1-9A-Za-z]{10}/,
+  NOTION_PAGE_ID: /([a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i,
+};
+
+// ==================== 选择器 ====================
+export const SELECTORS = {
+  VIDEO: 'video',
+  VIDEO_CONTAINER: '.bpx-player-container, #bilibili-player',
+  SUBTITLE_BUTTON: '.bpx-player-ctrl-subtitle-result',
+  SUBTITLE_LANGUAGE_ITEM: '.bpx-player-ctrl-subtitle-language-item',
+  SUBTITLE_CLOSE_SWITCH: '.bpx-player-ctrl-subtitle-close-switch[data-action="close"]',
+  VIDEO_TITLE_H1: 'h1.video-title',
+};
+
+// ==================== SponsorBlock 配置 ====================
+export const SPONSORBLOCK = {
+  // API配置
+  API_URL: 'https://bsbsb.top/api/skipSegments',
+  CACHE_EXPIRY: 1800000, // 30分钟
+  
+  // 视频质量配置
+  MIN_SCORE: 0.06,
+  MIN_VIEWS: 1000,
+  TAG_COLOR: 'linear-gradient(135deg, #FF6B6B, #FF4D4D)',
+  TAG_TEXT: '🔥 精选',
+  TOP_TAG_COLOR: 'linear-gradient(135deg, #FFD700, #FFA500)',
+  TOP_TAG_TEXT: '🏆 顶级',
+  AD_TAG_COLOR: 'linear-gradient(135deg, #FF8C00, #FF6347)',
+  AD_TAG_TEXT: '⚠️ 含广告',
+  
+  // 片段类别配置
+  CATEGORIES: {
+    'sponsor': { name: '广告', color: '#00d400' },
+    'selfpromo': { name: '无偿/自我推广', color: '#ffff00' },
+    'interaction': { name: '三连/订阅提醒', color: '#cc00ff' },
+    'poi_highlight': { name: '精彩时刻/重点', color: '#ff1684' },
+    'intro': { name: '过场/开场动画', color: '#00ffff' },
+    'outro': { name: '鸣谢/结束画面', color: '#0202ed' },
+    'preview': { name: '回顾/概要', color: '#008fd6' },
+    'filler': { name: '离题闲聊/玩笑', color: '#7300FF' },
+    'music_offtopic': { name: '音乐:非音乐部分', color: '#ff9900' },
+    'exclusive_access': { name: '柔性推广/品牌合作', color: '#008a5c' },
+    'mute': { name: '静音片段', color: '#B54D4B' }
+  },
+  
+  // 默认设置
+  DEFAULT_SETTINGS: {
+    skipCategories: ['sponsor'],
+    showAdBadge: true,
+    showQualityBadge: true,
+    showProgressMarkers: true
+  }
+};
+
