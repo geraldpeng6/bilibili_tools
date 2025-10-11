@@ -9,13 +9,17 @@ class ResourceManager {
       eventBusSubscriptions: new Map(), // EventBus订阅
       domListeners: new Map(),          // DOM事件监听器
       mutationObservers: new Set(),     // MutationObserver
-      intervals: new Set(),             // setInterval IDs
+      intervals: new Map(),             // setInterval IDs (改为Map存储创建时间)
       timeouts: new Set(),              // setTimeout IDs
       rafIds: new Set(),                // requestAnimationFrame IDs
       audioContexts: new Set(),         // AudioContext实例
       customCleanups: new Set(),        // 自定义清理函数
     };
     this.isDestroyed = false;
+    this.maxIntervalDuration = 300000; // 5分钟最大运行时间
+    
+    // 启动定期清理过期资源
+    this.startAutoCleanup();
   }
 
   /**
@@ -67,14 +71,29 @@ class ResourceManager {
   }
 
   /**
-   * 追踪 setInterval
+   * 追踪 setInterval（增强版：自动超时清理）
    * @param {Function} callback - 回调函数
    * @param {number} delay - 延迟
+   * @param {number} maxDuration - 最大运行时间（毫秒），默认5分钟
    * @returns {number} - interval ID
    */
-  trackInterval(callback, delay) {
-    const id = setInterval(callback, delay);
-    this.resources.intervals.add(id);
+  trackInterval(callback, delay, maxDuration = this.maxIntervalDuration) {
+    const startTime = Date.now();
+    const id = setInterval(() => {
+      // 检查是否超时
+      if (Date.now() - startTime > maxDuration) {
+        console.warn(`[ResourceManager] 定时器${id}运行超过${maxDuration}ms，自动清理`);
+        this.clearTrackedInterval(id);
+        return;
+      }
+      callback();
+    }, delay);
+    
+    this.resources.intervals.set(id, {
+      startTime,
+      maxDuration,
+      delay
+    });
     return id;
   }
 
@@ -149,6 +168,54 @@ class ResourceManager {
   }
 
   /**
+   * 启动自动清理（定期检查并清理过期资源）
+   */
+  startAutoCleanup() {
+    // 每30秒检查一次过期的interval
+    this.autoCleanupInterval = setInterval(() => {
+      this.cleanupExpiredIntervals();
+    }, 30000);
+  }
+
+  /**
+   * 清理超时运行的intervals
+   */
+  cleanupExpiredIntervals() {
+    const now = Date.now();
+    const toDelete = [];
+    
+    this.resources.intervals.forEach((info, id) => {
+      if (now - info.startTime > info.maxDuration) {
+        console.warn(`[ResourceManager] 清理超时interval: ${id}, 运行了${((now - info.startTime) / 1000).toFixed(1)}秒`);
+        clearInterval(id);
+        toDelete.push(id);
+      }
+    });
+    
+    toDelete.forEach(id => this.resources.intervals.delete(id));
+    
+    if (toDelete.length > 0) {
+      console.log(`[ResourceManager] 已清理${toDelete.length}个超时定时器`);
+    }
+  }
+
+  /**
+   * 获取资源统计信息
+   */
+  getStats() {
+    return {
+      intervals: this.resources.intervals.size,
+      timeouts: this.resources.timeouts.size,
+      rafIds: this.resources.rafIds.size,
+      audioContexts: this.resources.audioContexts.size,
+      domListeners: this.resources.domListeners.size,
+      mutationObservers: this.resources.mutationObservers.size,
+      eventBusSubscriptions: Array.from(this.resources.eventBusSubscriptions.values())
+        .reduce((sum, subs) => sum + subs.length, 0)
+    };
+  }
+
+  /**
    * 清理特定模块的 EventBus 订阅
    * @param {string} module - 模块名称
    */
@@ -209,8 +276,8 @@ class ResourceManager {
     });
     this.resources.mutationObservers.clear();
 
-    // 清理 intervals
-    this.resources.intervals.forEach(id => {
+    // 清理 intervals (更新为Map结构)
+    this.resources.intervals.forEach((info, id) => {
       try {
         clearInterval(id);
       } catch (error) {
@@ -218,6 +285,12 @@ class ResourceManager {
       }
     });
     this.resources.intervals.clear();
+    
+    // 清理自动清理定时器
+    if (this.autoCleanupInterval) {
+      clearInterval(this.autoCleanupInterval);
+      this.autoCleanupInterval = null;
+    }
 
     // 清理 timeouts
     this.resources.timeouts.forEach(id => {

@@ -5,6 +5,7 @@
 
 import state from '../state/StateManager.js';
 import eventBus from '../utils/EventBus.js';
+import performanceMonitor from '../utils/PerformanceMonitor.js';
 import { EVENTS, TIMING, SELECTORS, BALL_STATUS } from '../constants.js';
 import { getVideoInfo, delay, downloadFile, getVideoTitle } from '../utils/helpers.js';
 import { validateSubtitleData } from '../utils/validators.js';
@@ -42,53 +43,56 @@ class SubtitleService {
   }
 
   /**
-   * 下载捕获到的字幕
+   * 下载捕获到的字幕（集成性能监控）
    */
   async downloadCapturedSubtitle() {
     if (!this.capturedSubtitleUrl) {
       return;
     }
 
-    const videoInfo = getVideoInfo();
-    state.setVideoInfo(videoInfo);
+    // 性能监控：测量字幕下载耗时
+    await performanceMonitor.measureAsync('字幕下载', async () => {
+      const videoInfo = getVideoInfo();
+      state.setVideoInfo(videoInfo);
 
-    // 开始请求（使用状态管理器的原子操作）
-    const result = state.startRequest();
-    if (!result.success) {
-      // 如果是因为已有缓存，直接使用缓存
-      if (result.reason === '已有缓存') {
-        const cachedData = state.getSubtitleData();
-        if (cachedData) {
-          state.setBallStatus(BALL_STATUS.ACTIVE);
-          eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedData, state.getVideoKey());
+      // 开始请求（使用状态管理器的原子操作）
+      const result = state.startRequest();
+      if (!result.success) {
+        // 如果是因为已有缓存，直接使用缓存
+        if (result.reason === '已有缓存') {
+          const cachedData = state.getSubtitleData();
+          if (cachedData) {
+            state.setBallStatus(BALL_STATUS.ACTIVE);
+            eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedData, state.getVideoKey());
+          }
         }
-      }
-      return;
-    }
-
-    state.setBallStatus(BALL_STATUS.LOADING);
-    eventBus.emit(EVENTS.SUBTITLE_REQUESTED, videoInfo);
-
-    try {
-      const subtitleData = await this._fetchSubtitle(this.capturedSubtitleUrl, videoInfo);
-      
-      // 验证字幕数据
-      const validation = validateSubtitleData(subtitleData);
-      if (!validation.valid) {
-        throw new Error(validation.error);
+        return;
       }
 
-      // 保存字幕数据（自动更新缓存）
-      state.setSubtitleData(subtitleData);
-      state.setBallStatus(BALL_STATUS.ACTIVE);
+      state.setBallStatus(BALL_STATUS.LOADING);
+      eventBus.emit(EVENTS.SUBTITLE_REQUESTED, videoInfo);
 
-    } catch (error) {
-      console.error('[SubtitleService] 字幕获取失败:', error);
-      state.setBallStatus(BALL_STATUS.ERROR);
-      eventBus.emit(EVENTS.SUBTITLE_FAILED, error.message);
-    } finally {
-      state.finishRequest();
-    }
+      try {
+        const subtitleData = await this._fetchSubtitle(this.capturedSubtitleUrl, videoInfo);
+        
+        // 验证字幕数据
+        const validation = validateSubtitleData(subtitleData);
+        if (!validation.valid) {
+          throw new Error(validation.error);
+        }
+
+        // 保存字幕数据（自动更新缓存）
+        state.setSubtitleData(subtitleData);
+        state.setBallStatus(BALL_STATUS.ACTIVE);
+
+      } catch (error) {
+        console.error('[SubtitleService] 字幕获取失败:', error);
+        state.setBallStatus(BALL_STATUS.ERROR);
+        eventBus.emit(EVENTS.SUBTITLE_FAILED, error.message);
+      } finally {
+        state.finishRequest();
+      }
+    });
   }
 
   /**

@@ -5,11 +5,12 @@
 
 import speedControlService from '../services/SpeedControlService.js';
 import notification from './Notification.js';
+import modalManager from '../utils/ModalManager.js';
 
 class SpeedControlModal {
   constructor() {
     this.modal = null;
-    this.updateInterval = null;
+    this.speedChangeHandler = null;
   }
 
   /**
@@ -36,8 +37,14 @@ class SpeedControlModal {
     this.renderModal();
     modal.classList.add('show');
     
-    // 开始定期更新速度显示
-    this.startUpdateLoop();
+    // 绑定速度变化事件监听（事件驱动，不用轮询）
+    this.speedChangeHandler = () => {
+      this.updateSpeedDisplay();
+    };
+    document.addEventListener('speed-changed', this.speedChangeHandler);
+    
+    // 注册到模态框管理器（统一处理ESC键）
+    modalManager.push(this);
   }
 
   /**
@@ -48,8 +55,14 @@ class SpeedControlModal {
       this.modal.classList.remove('show');
     }
     
-    // 停止更新
-    this.stopUpdateLoop();
+    // 移除速度变化监听
+    if (this.speedChangeHandler) {
+      document.removeEventListener('speed-changed', this.speedChangeHandler);
+      this.speedChangeHandler = null;
+    }
+    
+    // 从模态框管理器移除
+    modalManager.pop(this);
   }
 
   /**
@@ -254,22 +267,17 @@ class SpeedControlModal {
   }
 
   /**
-   * 开始更新循环
+   * @deprecated 已移除轮询更新，改用事件驱动
    */
   startUpdateLoop() {
-    this.updateInterval = setInterval(() => {
-      this.updateSpeedDisplay();
-    }, 200);
+    // 空方法保留以防向后兼容
   }
 
   /**
-   * 停止更新循环
+   * @deprecated 已移除轮询更新，改用事件驱动
    */
   stopUpdateLoop() {
-    if (this.updateInterval) {
-      clearInterval(this.updateInterval);
-      this.updateInterval = null;
-    }
+    // 空方法保留以防向后兼容
   }
 }
 

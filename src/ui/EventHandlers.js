@@ -13,6 +13,10 @@ import speedControlService from '../services/SpeedControlService.js';
 import notification from './Notification.js';
 import uiRenderer from './UIRenderer.js';
 import notesPanel from './NotesPanel.js';
+import modalManager from '../utils/ModalManager.js';
+import domCache from '../utils/DOMCache.js';
+import searchIndex from '../utils/SearchIndex.js';
+import performanceMonitor from '../utils/PerformanceMonitor.js';
 import { SELECTORS, AI_API_KEY_URLS } from '../constants.js';
 import { debounce, throttleRAF, findSubtitleIndex } from '../utils/helpers.js';
 
@@ -32,12 +36,34 @@ class EventHandlers {
     this.searchMatches = [];
     this.currentMatchIndex = -1;
     this.searchTerm = '';
+    this.lastSearchTerm = ''; // 用于增量搜索
+    this.searchIndexBuilt = false; // 索引是否已构建
     // Subtitle highlight optimization
     this.subtitleDataCache = null;
     this.currentHighlightedIndex = -1;
     // Debounced/throttled functions
     this.debouncedSearch = null;
     this.throttledHighlight = null;
+    // 模态框代理对象（用于ModalManager）
+    this.aiConfigModalProxy = {
+      hide: () => this.hideAIConfigModal()
+    };
+    this.notionConfigModalProxy = {
+      hide: () => this.hideNotionConfigModal()
+    };
+  }
+
+  /**
+   * 初始化字幕搜索索引
+   * @param {Array} subtitleData - 字幕数据
+   */
+  initializeSearchIndex(subtitleData) {
+    if (subtitleData && subtitleData.length > 0) {
+      performanceMonitor.measure('构建搜索索引', () => {
+        searchIndex.buildIndex(subtitleData);
+        this.searchIndexBuilt = true;
+      });
+    }
   }
 
   /**
@@ -351,11 +377,12 @@ class EventHandlers {
   }
 
   /**
-   * 同步字幕高亮（优化版：使用节流+二分查找+缓存）
+   * 同步字幕高亮（优化版：使用节流+二分查找+缓存+DOM缓存）
    * @param {HTMLElement} container - 字幕容器
    */
   syncSubtitleHighlight(container) {
-    const video = document.querySelector(SELECTORS.VIDEO);
+    // 使用DOM缓存获取视频元素
+    const video = domCache.get(SELECTORS.VIDEO);
     if (!video) return;
 
     // 缓存字幕数据
@@ -405,12 +432,13 @@ class EventHandlers {
   }
 
   /**
-   * 滚动到当前播放的字幕
+   * 滚动到当前播放的字幕（使用DOM缓存优化）
    * @param {HTMLElement} container - 字幕容器
    */
   scrollToCurrentSubtitle(container) {
     setTimeout(() => {
-      const video = document.querySelector(SELECTORS.VIDEO);
+      // 使用DOM缓存获取视频元素
+      const video = domCache.get(SELECTORS.VIDEO);
       if (!video) return;
 
       const currentTime = video.currentTime;
@@ -429,36 +457,50 @@ class EventHandlers {
   }
 
   /**
-   * 处理搜索
+   * 处理搜索（集成性能监控和搜索索引）
    * @param {HTMLElement} container - 字幕容器
    * @param {string} searchTerm - 搜索词
    */
   handleSearch(container, searchTerm) {
-    this.searchTerm = searchTerm.trim();
-    
-    // 清除之前的高亮
-    this.clearSearchHighlights(container);
-    
-    if (!this.searchTerm) {
-      this.updateSearchCounter(0, 0);
-      return;
-    }
+    performanceMonitor.measure('字幕搜索', () => {
+      this.searchTerm = searchTerm.trim();
+      
+      // 清除之前的高亮
+      this.clearSearchHighlights(container);
+      
+      if (!this.searchTerm) {
+        this.updateSearchCounter(0, 0);
+        this.lastSearchTerm = '';
+        return;
+      }
 
-    // 在AI总结和字幕中搜索并高亮
-    this.searchMatches = [];
-    this.highlightSearchInContainer(container);
-    
-    // 更新计数器
-    this.updateSearchCounter(
-      this.searchMatches.length > 0 ? 1 : 0,
-      this.searchMatches.length
-    );
-    
-    // 如果有匹配，跳转到第一个
-    if (this.searchMatches.length > 0) {
-      this.currentMatchIndex = 0;
-      this.scrollToMatch(this.searchMatches[0]);
-    }
+      // 构建搜索索引（首次搜索时）
+      if (!this.searchIndexBuilt) {
+        const subtitleData = state.getSubtitleData();
+        if (subtitleData) {
+          searchIndex.buildIndex(subtitleData);
+          this.searchIndexBuilt = true;
+        }
+      }
+
+      // 在AI总结和字幕中搜索并高亮
+      this.searchMatches = [];
+      this.highlightSearchInContainer(container);
+      
+      // 更新计数器
+      this.updateSearchCounter(
+        this.searchMatches.length > 0 ? 1 : 0,
+        this.searchMatches.length
+      );
+      
+      // 如果有匹配，跳转到第一个
+      if (this.searchMatches.length > 0) {
+        this.currentMatchIndex = 0;
+        this.scrollToMatch(this.searchMatches[0]);
+      }
+
+      this.lastSearchTerm = this.searchTerm;
+    });
   }
 
   /**
@@ -635,6 +677,9 @@ class EventHandlers {
     document.getElementById('ai-auto-summary-enabled').checked = config.getAIAutoSummaryEnabled();
 
     modal.classList.add('show');
+    
+    // 注册到模态框管理器（统一处理ESC键）
+    modalManager.push(this.aiConfigModalProxy);
   }
 
   /**
@@ -650,6 +695,9 @@ class EventHandlers {
 
     modal.classList.remove('show');
     this.clearAIConfigForm();
+    
+    // 从模态框管理器移除
+    modalManager.pop(this.aiConfigModalProxy);
   }
 
   /**
@@ -703,6 +751,9 @@ class EventHandlers {
     if (statusEl) statusEl.innerHTML = '';
 
     modal.classList.add('show');
+    
+    // 注册到模态框管理器（统一处理ESC键）
+    modalManager.push(this.notionConfigModalProxy);
   }
 
   /**
@@ -713,6 +764,9 @@ class EventHandlers {
     if (modal) {
       modal.classList.remove('show');
     }
+    
+    // 从模态框管理器移除
+    modalManager.pop(this.notionConfigModalProxy);
   }
 
   /**

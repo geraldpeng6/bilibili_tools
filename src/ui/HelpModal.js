@@ -3,6 +3,8 @@
  * 显示工具的使用说明和快捷键
  */
 
+import modalManager from '../utils/ModalManager.js';
+
 class HelpModal {
   constructor() {
     this.modal = null;
@@ -31,6 +33,9 @@ class HelpModal {
     const modal = this.createModal();
     this.renderModal();
     modal.classList.add('show');
+    
+    // 注册到模态框管理器（统一处理ESC键）
+    modalManager.push(this);
   }
 
   /**
@@ -40,6 +45,9 @@ class HelpModal {
     if (this.modal) {
       this.modal.classList.remove('show');
     }
+    
+    // 从模态框管理器移除
+    modalManager.pop(this);
   }
 
   /**

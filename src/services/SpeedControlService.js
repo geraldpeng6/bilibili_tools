@@ -3,6 +3,9 @@
  * 提供媒体播放速度控制和响度检测功能
  */
 
+import domCache from '../utils/DOMCache.js';
+import audioContextPool from '../utils/AudioContextPool.js';
+
 const SPEED_CONFIG = {
   speedStep: 0.1,
   boostMultiplier: 1.5,
@@ -46,10 +49,11 @@ class SpeedControlService {
   }
 
   /**
-   * 获取当前所有媒体元素
+   * 获取当前所有媒体元素（使用DOM缓存优化）
    */
   getMediaElements() {
-    return Array.from(document.querySelectorAll('video, audio'));
+    // 使用缓存减少DOM查询
+    return domCache.getAll('video, audio', false);
   }
 
   /**
@@ -62,6 +66,12 @@ class SpeedControlService {
       media.playbackRate = speed;
       this.showSpeedIndicator(media, speed);
     });
+
+    // 触发速度变化事件（用于事件驱动的UI更新）
+    const speedChangeEvent = new CustomEvent('speed-changed', {
+      detail: { speed, baseSpeed: this.state.baseSpeed }
+    });
+    document.dispatchEvent(speedChangeEvent);
   }
 
   /**
@@ -195,33 +205,32 @@ class SpeedControlService {
   }
 
   /**
-   * 为媒体元素创建音频分析器
+   * 为媒体元素创建音频分析器（使用AudioContext池优化）
    */
   setupVolumeAnalyzer(media) {
     try {
       if (this.state.mediaAnalyzers.has(media)) {
-        return this.state.mediaAnalyzers.get(media);
+        const existing = this.state.mediaAnalyzers.get(media);
+        // 更新使用时间
+        audioContextPool.touch(media);
+        return existing;
       }
 
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
+      // 从池中获取或创建AudioContext
+      const poolEntry = audioContextPool.getOrCreate(media, false);
       
-      const source = audioContext.createMediaElementSource(media);
-      source.connect(analyser);
-      analyser.connect(audioContext.destination);
-
       const analyzer = {
-        context: audioContext,
-        analyser: analyser,
-        dataArray: new Uint8Array(analyser.frequencyBinCount),
-        intervalId: null
+        context: poolEntry.context,
+        analyser: poolEntry.analyzer,
+        dataArray: new Uint8Array(poolEntry.analyzer.frequencyBinCount),
+        rafId: null, // 使用RAF代替intervalId
+        intervalId: null // 保留用于向后兼容
       };
 
       this.state.mediaAnalyzers.set(media, analyzer);
       return analyzer;
     } catch (error) {
-      console.error('创建音频分析器失败:', error);
+      console.error('[SpeedControlService] 创建音频分析器失败:', error);
       return null;
     }
   }
@@ -245,53 +254,81 @@ class SpeedControlService {
   }
 
   /**
-   * 开始监测特定媒体元素的响度
+   * 开始监测特定媒体元素的响度（使用RAF优化，节流到200ms）
    */
   startVolumeDetection(media) {
     const analyzer = this.setupVolumeAnalyzer(media);
     if (!analyzer) return;
 
+    // 清理旧的检测循环
+    if (analyzer.rafId) {
+      cancelAnimationFrame(analyzer.rafId);
+    }
     if (analyzer.intervalId) {
       clearInterval(analyzer.intervalId);
     }
 
     this.createVolumeChart(media);
 
-    analyzer.intervalId = setInterval(() => {
-      if (!this.state.volumeDetectionEnabled || media.paused) {
+    // 使用RAF + 节流优化性能
+    let lastCheck = 0;
+    const checkInterval = 200; // 降低检测频率到200ms
+
+    const volumeCheckLoop = (timestamp) => {
+      // 检查是否应该继续检测
+      if (!this.state.volumeDetectionEnabled || !this.state.mediaAnalyzers.has(media)) {
         return;
       }
 
-      const volumeDb = this.getVolumeLevel(analyzer);
-      const shouldBoost = volumeDb < this.state.currentVolumeThreshold;
+      // 节流：只在间隔时间后检测
+      if (timestamp - lastCheck >= checkInterval) {
+        // 如果视频暂停，跳过检测但继续循环
+        if (!media.paused) {
+          const volumeDb = this.getVolumeLevel(analyzer);
+          const shouldBoost = volumeDb < this.state.currentVolumeThreshold;
 
-      this.updateVolumeChart(volumeDb);
+          this.updateVolumeChart(volumeDb);
 
-      if (shouldBoost && !this.state.isVolumeBoosted) {
-        this.state.isVolumeBoosted = true;
-        this.applySpeed(this.calculateFinalSpeed());
-      } else if (!shouldBoost && this.state.isVolumeBoosted) {
-        this.state.isVolumeBoosted = false;
-        this.applySpeed(this.calculateFinalSpeed());
+          if (shouldBoost && !this.state.isVolumeBoosted) {
+            this.state.isVolumeBoosted = true;
+            this.applySpeed(this.calculateFinalSpeed());
+          } else if (!shouldBoost && this.state.isVolumeBoosted) {
+            this.state.isVolumeBoosted = false;
+            this.applySpeed(this.calculateFinalSpeed());
+          }
+        }
+        lastCheck = timestamp;
       }
-    }, SPEED_CONFIG.volumeCheckInterval);
+
+      // 继续循环
+      analyzer.rafId = requestAnimationFrame(volumeCheckLoop);
+    };
+
+    // 启动RAF循环
+    analyzer.rafId = requestAnimationFrame(volumeCheckLoop);
   }
 
   /**
-   * 停止监测并清理资源
+   * 停止监测并清理资源（使用池化优化）
    */
   stopVolumeDetection(media) {
     const analyzer = this.state.mediaAnalyzers.get(media);
     if (!analyzer) return;
 
+    // 取消RAF循环
+    if (analyzer.rafId) {
+      cancelAnimationFrame(analyzer.rafId);
+      analyzer.rafId = null;
+    }
+
+    // 清理旧的interval（向后兼容）
     if (analyzer.intervalId) {
       clearInterval(analyzer.intervalId);
       analyzer.intervalId = null;
     }
 
-    if (analyzer.context) {
-      analyzer.context.close();
-    }
+    // 断开连接但不关闭Context（池化复用）
+    audioContextPool.disconnect(media);
 
     this.state.mediaAnalyzers.delete(media);
 

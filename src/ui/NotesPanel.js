@@ -4,6 +4,7 @@
  */
 
 import notesService from '../services/NotesService.js';
+import modalManager from '../utils/ModalManager.js';
 
 class NotesPanel {
   constructor() {
@@ -35,6 +36,9 @@ class NotesPanel {
     this.renderPanel();
     panel.classList.add('show');
     this.isPanelVisible = true;
+    
+    // 注册到模态框管理器（统一处理ESC键）
+    modalManager.push(this);
   }
 
   /**
@@ -45,6 +49,9 @@ class NotesPanel {
       this.panel.classList.remove('show');
     }
     this.isPanelVisible = false;
+    
+    // 从模态框管理器移除
+    modalManager.pop(this);
   }
 
   /**
@@ -179,7 +186,7 @@ class NotesPanel {
   }
 
   /**
-   * 绑定面板事件
+   * 绑定面板事件（使用事件委托优化性能）
    */
   bindPanelEvents() {
     // 关闭按钮
@@ -188,54 +195,59 @@ class NotesPanel {
       closeBtn.addEventListener('click', () => this.hidePanel());
     }
 
-    // 复制单条笔记
-    this.panel.querySelectorAll('.note-copy-btn').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        const noteId = e.target.getAttribute('data-note-id');
+    // 使用事件委托处理所有按钮点击（性能优化：从N个监听器减少到1个）
+    const panelBody = this.panel.querySelector('.notes-panel-body');
+    if (!panelBody) return;
+
+    panelBody.addEventListener('click', async (e) => {
+      // 处理单条笔记复制
+      const noteCopyBtn = e.target.closest('.note-copy-btn');
+      if (noteCopyBtn) {
+        const noteId = noteCopyBtn.getAttribute('data-note-id');
         const note = notesService.getAllNotes().find(n => n.id === noteId);
         if (note) {
           await this.copyToClipboard(note.content);
-          const originalText = e.target.textContent;
-          e.target.textContent = '✓';
+          const originalText = noteCopyBtn.textContent;
+          noteCopyBtn.textContent = '✓';
           setTimeout(() => {
-            e.target.textContent = originalText;
+            noteCopyBtn.textContent = originalText;
           }, 1000);
         }
-      });
-    });
+        return;
+      }
 
-    // 删除单条笔记
-    this.panel.querySelectorAll('.note-delete-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const noteId = e.target.getAttribute('data-note-id');
+      // 处理单条笔记删除
+      const noteDeleteBtn = e.target.closest('.note-delete-btn');
+      if (noteDeleteBtn) {
+        const noteId = noteDeleteBtn.getAttribute('data-note-id');
         notesService.deleteNote(noteId);
         this.renderPanel();
-      });
-    });
+        return;
+      }
 
-    // 批量复制
-    this.panel.querySelectorAll('.note-group-copy-btn').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        const date = e.target.getAttribute('data-date');
+      // 处理批量复制
+      const groupCopyBtn = e.target.closest('.note-group-copy-btn');
+      if (groupCopyBtn) {
+        const date = groupCopyBtn.getAttribute('data-date');
         const groupedNotes = notesService.getGroupedNotes();
         const group = groupedNotes.find(g => g.date === date);
         
         if (group) {
           const contents = group.notes.map(note => note.content).join('\n\n');
           await this.copyToClipboard(contents);
-          const originalText = e.target.textContent;
-          e.target.textContent = '✓';
+          const originalText = groupCopyBtn.textContent;
+          groupCopyBtn.textContent = '✓';
           setTimeout(() => {
-            e.target.textContent = originalText;
+            groupCopyBtn.textContent = originalText;
           }, 1000);
         }
-      });
-    });
+        return;
+      }
 
-    // 批量删除
-    this.panel.querySelectorAll('.note-group-delete-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const date = e.target.getAttribute('data-date');
+      // 处理批量删除
+      const groupDeleteBtn = e.target.closest('.note-group-delete-btn');
+      if (groupDeleteBtn) {
+        const date = groupDeleteBtn.getAttribute('data-date');
         const groupedNotes = notesService.getGroupedNotes();
         const group = groupedNotes.find(g => g.date === date);
         
@@ -244,7 +256,8 @@ class NotesPanel {
           notesService.deleteNotes(noteIds);
           this.renderPanel();
         }
-      });
+        return;
+      }
     });
   }
 

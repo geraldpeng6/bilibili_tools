@@ -6,6 +6,7 @@
 import { SPONSORBLOCK } from '../constants.js';
 import sponsorBlockConfig from '../config/SponsorBlockConfigManager.js';
 import notification from './Notification.js';
+import modalManager from '../utils/ModalManager.js';
 
 class SponsorBlockModal {
   constructor() {
@@ -35,6 +36,9 @@ class SponsorBlockModal {
     const modal = this.createModal();
     this.renderModal();
     modal.classList.add('show');
+    
+    // 注册到模态框管理器（统一处理ESC键）
+    modalManager.push(this);
   }
 
   /**
@@ -44,6 +48,9 @@ class SponsorBlockModal {
     if (this.modal) {
       this.modal.classList.remove('show');
     }
+    
+    // 从模态框管理器移除
+    modalManager.pop(this);
   }
 
   /**

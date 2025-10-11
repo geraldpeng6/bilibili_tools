@@ -34,6 +34,9 @@ import shortcutManager from './config/ShortcutManager.js';
 
 // 导入工具
 import { getVideoInfo, delay } from './utils/helpers.js';
+import performanceMonitor from './utils/PerformanceMonitor.js';
+import resourceManager from './utils/ResourceManager.js';
+import audioContextPool from './utils/AudioContextPool.js';
 
 // 导入常量
 import { EVENTS, TIMING, SELECTORS, BALL_STATUS } from './constants.js';
@@ -146,6 +149,16 @@ class BilibiliSubtitleExtractor {
     GM_registerMenuCommand('关于', () => {
       notification.info('Bilibili Tools v1.0.0 - by geraldpeng & claude 4.5 sonnet');
     });
+
+    GM_registerMenuCommand('性能报告', () => {
+      performanceMonitor.printReport();
+      const resourceStats = resourceManager.getStats();
+      const audioStats = audioContextPool.getStats();
+      console.group('📊 资源使用统计');
+      console.log('ResourceManager:', resourceStats);
+      console.log('AudioContextPool:', audioStats);
+      console.groupEnd();
+    });
   }
 
   /**
@@ -225,6 +238,8 @@ class BilibiliSubtitleExtractor {
     // 监听字幕加载完成事件
     eventBus.on(EVENTS.SUBTITLE_LOADED, (data, videoKey) => {
       this.renderSubtitles(data);
+      // 构建搜索索引（性能优化）
+      eventHandlers.initializeSearchIndex(data);
     });
 
     // 监听AI总结开始事件
@@ -539,7 +554,7 @@ class BilibiliSubtitleExtractor {
   }
 
   /**
-   * 清理应用资源
+   * 清理应用资源（增强版：清理所有性能优化模块）
    */
   cleanup() {
     console.log('[App] 开始清理应用资源');
@@ -561,6 +576,18 @@ class BilibiliSubtitleExtractor {
     
     // 清理速度控制服务
     speedControlService.destroy();
+    
+    // 清理AudioContext池
+    audioContextPool.clear();
+    
+    // 清理搜索索引
+    searchIndex.clear();
+    
+    // 清理性能监控
+    performanceMonitor.destroy();
+    
+    // 清理资源管理器
+    resourceManager.cleanup();
     
     console.log('[App] 应用资源清理完成');
   }

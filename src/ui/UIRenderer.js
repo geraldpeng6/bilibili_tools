@@ -5,19 +5,21 @@
 
 import { ICONS } from './styles.js';
 import state from '../state/StateManager.js';
+import performanceMonitor from '../utils/PerformanceMonitor.js';
 import { formatTime } from '../utils/helpers.js';
 import config from '../config/ConfigManager.js';
 import { AI_API_KEY_URLS } from '../constants.js';
 
 class UIRenderer {
   /**
-   * 渲染字幕面板
+   * 渲染字幕面板（集成性能监控）
    * @param {Array} subtitleData - 字幕数据
    * @returns {string} - HTML字符串
    */
   renderSubtitlePanel(subtitleData) {
-    const videoKey = state.getVideoKey();
-    const cachedSummary = videoKey ? state.getAISummary(videoKey) : null;
+    return performanceMonitor.measure('渲染字幕面板', () => {
+      const videoKey = state.getVideoKey();
+      const cachedSummary = videoKey ? state.getAISummary(videoKey) : null;
 
     let html = `
       <div class="subtitle-header">
@@ -63,12 +65,13 @@ class UIRenderer {
       `;
     });
 
-    html += `
+      html += `
         </div>
       </div>
     `;
 
-    return html;
+      return html;
+    });
   }
 
   /**

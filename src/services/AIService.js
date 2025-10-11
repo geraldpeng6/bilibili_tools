@@ -6,6 +6,7 @@
 import config from '../config/ConfigManager.js';
 import state from '../state/StateManager.js';
 import eventBus from '../utils/EventBus.js';
+import performanceMonitor from '../utils/PerformanceMonitor.js';
 import { EVENTS, TIMING } from '../constants.js';
 import { withTimeout } from '../utils/helpers.js';
 
@@ -34,7 +35,7 @@ class AIService {
   }
 
   /**
-   * 生成AI总结
+   * 生成AI总结（集成性能监控）
    * @param {Array} subtitleData - 字幕数据
    * @param {boolean} isAuto - 是否自动触发
    * @returns {Promise<string>}
@@ -45,73 +46,76 @@ class AIService {
       throw new Error('已有总结任务在进行中');
     }
 
-    try {
-      const aiConfig = config.getSelectedAIConfig();
-      
-      if (!aiConfig) {
-        throw new Error('未找到AI配置，请先在设置中添加配置');
+    // 性能监控：测量AI总结耗时
+    return await performanceMonitor.measureAsync('AI总结', async () => {
+      try {
+        const aiConfig = config.getSelectedAIConfig();
+        
+        if (!aiConfig) {
+          throw new Error('未找到AI配置，请先在设置中添加配置');
+        }
+
+        if (!aiConfig.apiKey || aiConfig.apiKey.trim() === '') {
+          throw new Error('请先配置 AI API Key\n\n请点击右上角设置按钮，选择"AI配置"，然后为所选的AI服务商配置API Key');
+        }
+
+        // 验证配置
+        if (!aiConfig.url || !aiConfig.url.startsWith('http')) {
+          throw new Error('API URL格式错误，请在设置中检查配置');
+        }
+
+        if (!aiConfig.model || aiConfig.model.trim() === '') {
+          throw new Error('未配置模型，请在设置中选择AI模型');
+        }
+
+        // 生成字幕文本
+        const subtitleText = subtitleData.map(item => item.content).join('\n');
+
+        // 构建请求头
+        const headers = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${aiConfig.apiKey}`
+        };
+
+        // OpenRouter需要额外的headers
+        if (aiConfig.isOpenRouter) {
+          headers['HTTP-Referer'] = window.location.origin;
+          headers['X-Title'] = 'Bilibili Subtitle Extractor';
+        }
+
+        const requestBody = {
+          model: aiConfig.model,
+          messages: [
+            {
+              role: 'user',
+              content: aiConfig.prompt + subtitleText
+            }
+          ],
+          stream: true
+        };
+
+        // 使用超时机制发起请求（修复内存泄漏问题）
+        const summaryPromise = this._streamingRequest(aiConfig.url, headers, requestBody);
+        
+        // 添加超时保护
+        const summary = await withTimeout(
+          summaryPromise,
+          TIMING.AI_SUMMARY_TIMEOUT,
+          'AI总结超时，请稍后重试'
+        );
+
+        // 完成总结
+        state.finishAISummary(summary);
+        
+        return summary;
+
+      } catch (error) {
+        // 发生错误时，确保状态正确重置
+        state.cancelAISummary();
+        eventBus.emit(EVENTS.AI_SUMMARY_FAILED, error.message);
+        throw error;
       }
-
-      if (!aiConfig.apiKey || aiConfig.apiKey.trim() === '') {
-        throw new Error('请先配置 AI API Key\n\n请点击右上角设置按钮，选择"AI配置"，然后为所选的AI服务商配置API Key');
-      }
-
-      // 验证配置
-      if (!aiConfig.url || !aiConfig.url.startsWith('http')) {
-        throw new Error('API URL格式错误，请在设置中检查配置');
-      }
-
-      if (!aiConfig.model || aiConfig.model.trim() === '') {
-        throw new Error('未配置模型，请在设置中选择AI模型');
-      }
-
-      // 生成字幕文本
-      const subtitleText = subtitleData.map(item => item.content).join('\n');
-
-      // 构建请求头
-      const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${aiConfig.apiKey}`
-      };
-
-      // OpenRouter需要额外的headers
-      if (aiConfig.isOpenRouter) {
-        headers['HTTP-Referer'] = window.location.origin;
-        headers['X-Title'] = 'Bilibili Subtitle Extractor';
-      }
-
-      const requestBody = {
-        model: aiConfig.model,
-        messages: [
-          {
-            role: 'user',
-            content: aiConfig.prompt + subtitleText
-          }
-        ],
-        stream: true
-      };
-
-      // 使用超时机制发起请求（修复内存泄漏问题）
-      const summaryPromise = this._streamingRequest(aiConfig.url, headers, requestBody);
-      
-      // 添加超时保护
-      const summary = await withTimeout(
-        summaryPromise,
-        TIMING.AI_SUMMARY_TIMEOUT,
-        'AI总结超时，请稍后重试'
-      );
-
-      // 完成总结
-      state.finishAISummary(summary);
-      
-      return summary;
-
-    } catch (error) {
-      // 发生错误时，确保状态正确重置
-      state.cancelAISummary();
-      eventBus.emit(EVENTS.AI_SUMMARY_FAILED, error.message);
-      throw error;
-    }
+    });
   }
 
   /**
