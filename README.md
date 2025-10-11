@@ -1,5 +1,7 @@
 # Bilibili Tools
 
+@https://github.com/geraldpeng6/bilibili_tools
+
 一个功能强大的油猴脚本，整合了字幕提取、AI总结、笔记管理、播放控制、广告跳过等六大功能。
 
 ## 核心功能
