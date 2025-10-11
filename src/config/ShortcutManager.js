@@ -8,8 +8,6 @@ const STORAGE_KEY = 'bilibili_shortcuts_config';
 // 默认快捷键配置
 const DEFAULT_SHORTCUTS = {
   toggleSubtitlePanel: { key: 'b', ctrl: true, alt: false, shift: false, description: '切换字幕面板' },
-  toggleNotesPanel: { key: 'l', ctrl: true, alt: false, shift: false, description: '切换笔记面板' },
-  saveNote: { key: 's', ctrl: true, alt: false, shift: false, description: '保存选中文本为笔记' },
   speedIncrease: { key: 'Period', ctrl: false, alt: false, shift: false, description: '增加播放速度' },
   speedDecrease: { key: 'Comma', ctrl: false, alt: false, shift: false, description: '减少播放速度' },
   speedReset: { key: 'Comma', ctrl: false, alt: false, shift: false, doubleClick: true, description: '重置播放速度(双击)' },

@@ -25,7 +25,6 @@ import notification from './ui/Notification.js';
 import uiRenderer from './ui/UIRenderer.js';
 import eventHandlers from './ui/EventHandlers.js';
 import notesPanel from './ui/NotesPanel.js';
-import shortcutConfigModal from './ui/ShortcutConfigModal.js';
 import speedControlModal from './ui/SpeedControlModal.js';
 import helpModal from './ui/HelpModal.js';
 import sponsorBlockModal from './ui/SponsorBlockModal.js';
@@ -108,32 +107,6 @@ class BilibiliSubtitleExtractor {
       state.togglePanel();
     });
 
-    // 切换笔记面板
-    shortcutManager.register('toggleNotesPanel', () => {
-      notesPanel.togglePanel();
-    });
-
-    // 保存选中文本为笔记
-    shortcutManager.register('saveNote', () => {
-      if (notesService.savedSelectionText) {
-        notesService.addNote(notesService.savedSelectionText, window.location.href);
-        
-        const selection = window.getSelection();
-        if (selection.rangeCount > 0) {
-          selection.removeAllRanges();
-        }
-        
-        notesService.hideBlueDot();
-        notesService.savedSelectionText = '';
-        
-        if (notesPanel.isPanelVisible) {
-          notesPanel.renderPanel();
-        }
-      } else {
-        notesPanel.togglePanel();
-      }
-    });
-
     // 开始监听
     shortcutManager.startListening();
   }
@@ -166,16 +139,12 @@ class BilibiliSubtitleExtractor {
       sponsorBlockModal.show();
     });
 
-    GM_registerMenuCommand('快捷键设置', () => {
-      shortcutConfigModal.show();
-    });
-
     GM_registerMenuCommand('使用帮助', () => {
       helpModal.show();
     });
 
     GM_registerMenuCommand('关于', () => {
-      notification.info('Bilibili Tools v6.0.0 - by geraldpeng & claude 4.5 sonnet');
+      notification.info('Bilibili Tools v1.0.0 - by geraldpeng & claude 4.5 sonnet');
     });
   }
 

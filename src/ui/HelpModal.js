@@ -79,67 +79,56 @@ class HelpModal {
                   <td style="padding: 8px;"><code style="background: rgba(255, 255, 255, 0.1); padding: 2px 6px; border-radius: 3px; color: #feebea;">Cmd/Ctrl + B</code></td>
                   <td style="padding: 8px; color: rgba(255, 255, 255, 0.7);">显示/隐藏字幕面板</td>
                 </tr>
-                <tr style="border-bottom: 1px solid #e5e7eb;">
-                  <td style="padding: 8px;">切换笔记面板</td>
-                  <td style="padding: 8px;"><code style="background: #f3f4f6; padding: 2px 6px; border-radius: 3px;">Cmd/Ctrl + L</code></td>
-                  <td style="padding: 8px; color: #6b7280;">显示/隐藏笔记管理</td>
+                <tr style="border-bottom: 1px solid rgba(254, 235, 234, 0.1);">
+                  <td style="padding: 8px; color: #e5e7eb;">增加速度</td>
+                  <td style="padding: 8px;"><code style="background: rgba(255, 255, 255, 0.1); padding: 2px 6px; border-radius: 3px; color: #feebea;">.</code></td>
+                  <td style="padding: 8px; color: rgba(255, 255, 255, 0.7);">每次增加0.1x</td>
                 </tr>
-                <tr style="border-bottom: 1px solid #e5e7eb;">
-                  <td style="padding: 8px;">保存笔记</td>
-                  <td style="padding: 8px;"><code style="background: #f3f4f6; padding: 2px 6px; border-radius: 3px;">Cmd/Ctrl + S</code></td>
-                  <td style="padding: 8px; color: #6b7280;">保存选中文字或打开笔记面板</td>
+                <tr style="border-bottom: 1px solid rgba(254, 235, 234, 0.1);">
+                  <td style="padding: 8px; color: #e5e7eb;">减少速度</td>
+                  <td style="padding: 8px;"><code style="background: rgba(255, 255, 255, 0.1); padding: 2px 6px; border-radius: 3px; color: #feebea;">,</code></td>
+                  <td style="padding: 8px; color: rgba(255, 255, 255, 0.7);">每次减少0.1x</td>
                 </tr>
-                <tr style="border-bottom: 1px solid #e5e7eb;">
-                  <td style="padding: 8px;">增加速度</td>
-                  <td style="padding: 8px;"><code style="background: #f3f4f6; padding: 2px 6px; border-radius: 3px;">.</code></td>
-                  <td style="padding: 8px; color: #6b7280;">每次增加0.1x</td>
+                <tr style="border-bottom: 1px solid rgba(254, 235, 234, 0.1);">
+                  <td style="padding: 8px; color: #e5e7eb;">2倍速</td>
+                  <td style="padding: 8px;"><code style="background: rgba(255, 255, 255, 0.1); padding: 2px 6px; border-radius: 3px; color: #feebea;">.. (双击)</code></td>
+                  <td style="padding: 8px; color: rgba(255, 255, 255, 0.7);">直接设为2倍速</td>
                 </tr>
-                <tr style="border-bottom: 1px solid #e5e7eb;">
-                  <td style="padding: 8px;">减少速度</td>
-                  <td style="padding: 8px;"><code style="background: #f3f4f6; padding: 2px 6px; border-radius: 3px;">,</code></td>
-                  <td style="padding: 8px; color: #6b7280;">每次减少0.1x</td>
+                <tr style="border-bottom: 1px solid rgba(254, 235, 234, 0.1);">
+                  <td style="padding: 8px; color: #e5e7eb;">重置速度</td>
+                  <td style="padding: 8px;"><code style="background: rgba(255, 255, 255, 0.1); padding: 2px 6px; border-radius: 3px; color: #feebea;">,, (双击)</code></td>
+                  <td style="padding: 8px; color: rgba(255, 255, 255, 0.7);">重置为1倍速</td>
                 </tr>
-                <tr style="border-bottom: 1px solid #e5e7eb;">
-                  <td style="padding: 8px;">2倍速</td>
-                  <td style="padding: 8px;"><code style="background: #f3f4f6; padding: 2px 6px; border-radius: 3px;">.. (双击)</code></td>
-                  <td style="padding: 8px; color: #6b7280;">直接设为2倍速</td>
+                <tr style="border-bottom: 1px solid rgba(254, 235, 234, 0.1);">
+                  <td style="padding: 8px; color: #e5e7eb;">临时加速</td>
+                  <td style="padding: 8px;"><code style="background: rgba(255, 255, 255, 0.1); padding: 2px 6px; border-radius: 3px; color: #feebea;">右Option键</code></td>
+                  <td style="padding: 8px; color: rgba(255, 255, 255, 0.7);">按住时1.5x加速</td>
                 </tr>
-                <tr style="border-bottom: 1px solid #e5e7eb;">
-                  <td style="padding: 8px;">重置速度</td>
-                  <td style="padding: 8px;"><code style="background: #f3f4f6; padding: 2px 6px; border-radius: 3px;">,, (双击)</code></td>
-                  <td style="padding: 8px; color: #6b7280;">重置为1倍速</td>
-                </tr>
-                <tr style="border-bottom: 1px solid #e5e7eb;">
-                  <td style="padding: 8px;">临时加速</td>
-                  <td style="padding: 8px;"><code style="background: #f3f4f6; padding: 2px 6px; border-radius: 3px;">右Option键</code></td>
-                  <td style="padding: 8px; color: #6b7280;">按住时1.5x加速</td>
-                </tr>
-                <tr style="border-bottom: 1px solid #e5e7eb;">
-                  <td style="padding: 8px;">响度检测</td>
-                  <td style="padding: 8px;"><code style="background: #f3f4f6; padding: 2px 6px; border-radius: 3px;">, + . (同时按)</code></td>
-                  <td style="padding: 8px; color: #6b7280;">开启/关闭自动加速</td>
+                <tr style="border-bottom: 1px solid rgba(254, 235, 234, 0.1);">
+                  <td style="padding: 8px; color: #e5e7eb;">响度检测</td>
+                  <td style="padding: 8px;"><code style="background: rgba(255, 255, 255, 0.1); padding: 2px 6px; border-radius: 3px; color: #feebea;">, + . (同时按)</code></td>
+                  <td style="padding: 8px; color: rgba(255, 255, 255, 0.7);">开启/关闭自动加速</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
           <div style="margin-bottom: 20px;">
-            <h3 style="color: #2d2d2d; margin-bottom: 10px; font-size: 16px;">使用说明</h3>
-            <div style="line-height: 1.8; color: #374151;">
+            <h3 style="color: #fff; margin-bottom: 10px; font-size: 16px;">使用说明</h3>
+            <div style="line-height: 1.8; color: #e5e7eb;">
               <p style="margin: 8px 0;"><strong>字幕提取：</strong>打开B站视频，等待几秒，字幕面板自动出现在右侧</p>
               <p style="margin: 8px 0;"><strong>AI总结：</strong>配置AI服务（菜单 → AI配置），点击魔法棒图标 ✨</p>
               <p style="margin: 8px 0;"><strong>笔记保存：</strong>选中任意文字，点击粉色钢笔图标</p>
               <p style="margin: 8px 0;"><strong>速度控制：</strong>使用 , 和 . 键调整速度，同时按切换响度检测</p>
-              <p style="margin: 8px 0;"><strong>快捷键自定义：</strong>菜单 → 快捷键设置，点击输入框后按下想要的按键组合</p>
             </div>
           </div>
 
           <div style="padding: 15px; background: rgba(254, 235, 234, 0.1); border-radius: 10px; border-left: 4px solid #feebea;">
             <div style="font-size: 13px; color: #fff; font-weight: 600; margin-bottom: 4px;">提示</div>
             <div style="font-size: 12px; color: rgba(255, 255, 255, 0.7); line-height: 1.5;">
-              • 所有快捷键均可通过"快捷键设置"自定义<br>
               • AI配置支持多个提供商，可自由切换<br>
-              • 笔记保存在本地，按日期自动分组
+              • 笔记保存在本地，按日期自动分组<br>
+              • SponsorBlock支持自动跳过广告和赞助片段
             </div>
           </div>
         </div>

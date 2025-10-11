@@ -1172,6 +1172,23 @@ export const CSS_STYLES = `
     padding: 20px;
   }
 
+  .notes-panel-body::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .notes-panel-body::-webkit-scrollbar-thumb {
+    background-color: rgba(254, 235, 234, 0.4);
+    border-radius: 3px;
+  }
+  
+  .notes-panel-body::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(254, 235, 234, 0.6);
+  }
+  
+  .notes-panel-body::-webkit-scrollbar-track {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+
   .notes-empty-state {
     text-align: center;
     padding: 60px 20px;
