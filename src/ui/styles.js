@@ -38,6 +38,11 @@ export const CSS_STYLES = `
     animation: breath-ball 1.2s ease-in-out infinite;
   }
 
+  #subtitle-ball.ai-summarizing {
+    background-color: #feebea;
+    animation: breath-ball-ai 1s ease-in-out infinite;
+  }
+
   #subtitle-ball.no-subtitle {
     background-color: #999;
     cursor: default;
@@ -57,6 +62,19 @@ export const CSS_STYLES = `
   @keyframes breath-ball {
     0%, 100% { transform: translateY(-50%) scale(1.1); opacity: 1; }
     50% { transform: translateY(-50%) scale(1.4); opacity: 0.6; }
+  }
+
+  @keyframes breath-ball-ai {
+    0%, 100% { 
+      transform: translateY(-50%) scale(1.3); 
+      opacity: 1;
+      box-shadow: 0 0 20px rgba(254, 235, 234, 0.8);
+    }
+    50% { 
+      transform: translateY(-50%) scale(1.8); 
+      opacity: 0.7;
+      box-shadow: 0 0 40px rgba(254, 235, 234, 1);
+    }
   }
 
   /* ==================== 字幕容器样式 ==================== */

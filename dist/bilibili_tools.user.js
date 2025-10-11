@@ -323,6 +323,11 @@
     animation: breath-ball 1.2s ease-in-out infinite;
   }
 
+  #subtitle-ball.ai-summarizing {
+    background-color: #feebea;
+    animation: breath-ball-ai 1s ease-in-out infinite;
+  }
+
   #subtitle-ball.no-subtitle {
     background-color: #999;
     cursor: default;
@@ -342,6 +347,19 @@
   @keyframes breath-ball {
     0%, 100% { transform: translateY(-50%) scale(1.1); opacity: 1; }
     50% { transform: translateY(-50%) scale(1.4); opacity: 0.6; }
+  }
+
+  @keyframes breath-ball-ai {
+    0%, 100% { 
+      transform: translateY(-50%) scale(1.3); 
+      opacity: 1;
+      box-shadow: 0 0 20px rgba(254, 235, 234, 0.8);
+    }
+    50% { 
+      transform: translateY(-50%) scale(1.8); 
+      opacity: 0.7;
+      box-shadow: 0 0 40px rgba(254, 235, 234, 1);
+    }
   }
 
   /* ==================== 字幕容器样式 ==================== */
@@ -9634,6 +9652,22 @@
         this.renderSubtitles(data);
       });
 
+      // 监听AI总结开始事件
+      eventBus.on(EVENTS.AI_SUMMARY_START, () => {
+        console.log('[App] AI总结开始，小球进入AI总结状态');
+        // 小球进入AI总结状态（更大幅度呼吸）
+        if (this.ball) {
+          this.ball.classList.remove('loading', 'active', 'no-subtitle', 'error');
+          this.ball.classList.add('ai-summarizing');
+          this.ball.title = '正在AI总结...';
+        }
+        // AI图标进入加载状态
+        const aiIcon = this.container?.querySelector('.ai-icon');
+        if (aiIcon) {
+          aiIcon.classList.add('loading');
+        }
+      });
+
       // 监听AI总结chunk更新
       eventBus.on(EVENTS.AI_SUMMARY_CHUNK, (summary) => {
         if (this.container) {
@@ -9643,9 +9677,16 @@
 
       // 监听AI总结完成事件
       eventBus.on(EVENTS.AI_SUMMARY_COMPLETE, (summary, videoKey) => {
+        console.log('[App] AI总结完成，恢复小球正常状态');
         notification.success('AI总结完成');
         if (this.container) {
           uiRenderer.updateAISummary(this.container, summary);
+        }
+        // 恢复小球正常状态
+        if (this.ball) {
+          this.ball.classList.remove('ai-summarizing', 'loading');
+          this.ball.classList.add('active');
+          this.ball.title = '字幕提取器 - 点击查看字幕';
         }
         // 更新AI图标状态
         const aiIcon = this.container?.querySelector('.ai-icon');
@@ -9670,7 +9711,19 @@
       });
 
       eventBus.on(EVENTS.AI_SUMMARY_FAILED, (error) => {
+        console.log('[App] AI总结失败，恢复小球正常状态');
         notification.handleError(error, 'AI总结');
+        // 恢复小球正常状态
+        if (this.ball) {
+          this.ball.classList.remove('ai-summarizing', 'loading');
+          this.ball.classList.add('active');
+          this.ball.title = '字幕提取器 - 点击查看字幕';
+        }
+        // 更新AI图标状态
+        const aiIcon = this.container?.querySelector('.ai-icon');
+        if (aiIcon) {
+          aiIcon.classList.remove('loading');
+        }
       });
 
       eventBus.on(EVENTS.NOTION_SEND_FAILED, (error) => {
