@@ -4446,6 +4446,11 @@
             clearTimeout(this.selectionTimeout);
           }
 
+          // 保存鼠标位置
+          const mouseX = e.clientX;
+          const mouseY = e.clientY;
+          console.log(`[NotesService] 鼠标位置: clientX=${mouseX}, clientY=${mouseY}`);
+
           this.selectionTimeout = setTimeout(() => {
             try {
               const selection = window.getSelection();
@@ -4457,63 +4462,12 @@
                 console.log(`[NotesService] 检测到文本选择: "${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}"`);
                 this.savedSelectionText = selectedText;
 
-                const range = selection.getRangeAt(0);
-                const rects = range.getClientRects();
-                
-                console.log(`[NotesService] 选择范围矩形数量: ${rects.length}`);
-                
-                // 如果 getClientRects() 返回空数组，使用 getBoundingClientRect() 作为后备
-                if (rects.length === 0) {
-                  console.log('[NotesService] ⚠ getClientRects() 返回空，使用 getBoundingClientRect() 作为后备');
-                  const boundingRect = range.getBoundingClientRect();
-                  
-                  if (boundingRect.width === 0 && boundingRect.height === 0) {
-                    console.warn('[NotesService] ⚠ getBoundingClientRect() 也返回空矩形，隐藏保存点');
-                    this.hideBlueDot();
-                    return;
-                  }
-                  
-                  // 使用包围盒的右下角作为默认位置
-                  const x = boundingRect.right + window.scrollX + 5;
-                  const y = boundingRect.bottom + window.scrollY + 5;
-                  console.log(`[NotesService] 使用包围盒位置: x=${x}, y=${y}`);
-                  this.showBlueDot(x, y);
-                  return;
-                }
-
-                // 判断选择方向
-                const anchorNode = selection.anchorNode;
-                const focusNode = selection.focusNode;
-                const anchorOffset = selection.anchorOffset;
-                const focusOffset = selection.focusOffset;
-                
-                let isForward = true;
-                if (anchorNode === focusNode) {
-                  isForward = anchorOffset <= focusOffset;
-                } else {
-                  const position = anchorNode.compareDocumentPosition(focusNode);
-                  isForward = (position & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
-                }
-                
-                console.log(`[NotesService] 选择方向: ${isForward ? '向前（从上到下）' : '向后（从下到上）'}`);
-                
-                let x, y;
-                if (isForward) {
-                  // 从上往下选中 → 显示在最后一个字右下角
-                  const lastRect = rects[rects.length - 1];
-                  x = lastRect.right + window.scrollX + 5;
-                  y = lastRect.bottom + window.scrollY + 5;
-                  console.log(`[NotesService] 计算位置（向前）: lastRect.right=${lastRect.right}, lastRect.bottom=${lastRect.bottom}`);
-                } else {
-                  // 从下往上选中 → 显示在第一个字左上角
-                  const firstRect = rects[0];
-                  x = firstRect.left + window.scrollX - 35;
-                  y = firstRect.top + window.scrollY - 35;
-                  console.log(`[NotesService] 计算位置（向后）: firstRect.left=${firstRect.left}, firstRect.top=${firstRect.top}`);
-                }
+                // 使用鼠标位置 + 偏移量来显示保存点
+                const x = mouseX + window.scrollX + 10;
+                const y = mouseY + window.scrollY + 10;
                 
                 console.log(`[NotesService] 滚动偏移: scrollX=${window.scrollX}, scrollY=${window.scrollY}`);
-                console.log(`[NotesService] 最终位置: x=${x}, y=${y}`);
+                console.log(`[NotesService] 计算位置（鼠标附近）: x=${x}, y=${y}`);
 
                 this.showBlueDot(x, y);
               } else {
