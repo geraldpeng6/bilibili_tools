@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+
+# 构建 user.js
+npm run build
+
+# 将构建产物添加到暂存区
+git add dist/bilibili_tools.user.js
