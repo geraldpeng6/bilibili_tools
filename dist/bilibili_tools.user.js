@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Bilibili Tools
 // @namespace    http://tampermonkey.net/
-// @version      6.0.0
+// @version      6.0.1
 // @author       geraldpeng & claude 4.5 sonnet
 // @description  字幕提取、AI总结、Notion集成、笔记保存、播放速度控制、SponsorBlock广告跳过 - 六合一工具集
 // @license      MIT
