@@ -41,6 +41,8 @@ import audioContextPool from './utils/AudioContextPool.js';
 // 导入常量
 import { EVENTS, TIMING, SELECTORS, BALL_STATUS } from './constants.js';
 
+const IS_BILIBILI = location.hostname.endsWith('bilibili.com');
+
 /**
  * 应用主类
  */
@@ -50,6 +52,7 @@ class BilibiliSubtitleExtractor {
     this.ball = null;
     this.container = null;
     this.videoQualityService = null;
+    this.isBilibili = IS_BILIBILI;
   }
 
   /**
@@ -70,21 +73,24 @@ class BilibiliSubtitleExtractor {
     // 初始化速度控制服务
     speedControlService.init();
 
-    // 初始化 SponsorBlock 服务
-    await sponsorBlockService.init();
+    if (this.isBilibili) {
+      await sponsorBlockService.init();
+      this.videoQualityService = createVideoQualityService(sponsorBlockService.getAPI());
+      this.videoQualityService.start();
+    }
 
-    // 初始化视频质量服务
-    this.videoQualityService = createVideoQualityService(sponsorBlockService.getAPI());
-    this.videoQualityService.start();
-
-    // 创建UI元素
-    this.createUI();
+    // 创建UI元素（仅 B 站）
+    if (this.isBilibili) {
+      this.createUI();
+    }
 
     // 绑定事件
     this.bindEvents();
 
-    // 设置自动化逻辑
-    this.setupAutomation();
+    // 设置自动化逻辑（仅 B 站）
+    if (this.isBilibili) {
+      this.setupAutomation();
+    }
 
     // 注册油猴菜单
     this.registerMenuCommands();
@@ -92,11 +98,10 @@ class BilibiliSubtitleExtractor {
     // 注册快捷键
     this.registerShortcuts();
 
-    // 开始检测字幕
-    subtitleService.checkSubtitleButton();
-
-    // 监听视频切换
-    this.observeVideoChange();
+    if (this.isBilibili) {
+      subtitleService.checkSubtitleButton();
+      this.observeVideoChange();
+    }
 
     this.initialized = true;
   }
@@ -108,6 +113,11 @@ class BilibiliSubtitleExtractor {
     // 切换字幕面板
     shortcutManager.register('toggleSubtitlePanel', () => {
       state.togglePanel();
+    });
+
+    // 切换笔记面板（全站可用）
+    shortcutManager.register('toggleNotesPanel', () => {
+      notesPanel.togglePanel();
     });
 
     // 开始监听
@@ -122,13 +132,15 @@ class BilibiliSubtitleExtractor {
       return;
     }
 
-    GM_registerMenuCommand('AI配置', () => {
-      eventHandlers.showAIConfigModal();
-    });
+    if (this.isBilibili) {
+      GM_registerMenuCommand('AI配置', () => {
+        eventHandlers.showAIConfigModal();
+      });
 
-    GM_registerMenuCommand('Notion配置', () => {
-      eventHandlers.showNotionConfigModal();
-    });
+      GM_registerMenuCommand('Notion配置', () => {
+        eventHandlers.showNotionConfigModal();
+      });
+    }
 
     GM_registerMenuCommand('笔记管理', () => {
       notesPanel.togglePanel();
@@ -138,9 +150,11 @@ class BilibiliSubtitleExtractor {
       speedControlModal.show();
     });
 
-    GM_registerMenuCommand('SponsorBlock 设置', () => {
-      sponsorBlockModal.show();
-    });
+    if (this.isBilibili) {
+      GM_registerMenuCommand('SponsorBlock 设置', () => {
+        sponsorBlockModal.show();
+      });
+    }
 
     GM_registerMenuCommand('使用帮助', () => {
       helpModal.show();
@@ -165,15 +179,25 @@ class BilibiliSubtitleExtractor {
    * 等待页面元素加载完成
    */
   async waitForPageReady() {
-    return new Promise((resolve) => {
-      const checkInterval = setInterval(() => {
-        const videoContainer = document.querySelector(SELECTORS.VIDEO_CONTAINER);
-        if (videoContainer) {
-          clearInterval(checkInterval);
+    if (this.isBilibili) {
+      return new Promise((resolve) => {
+        const checkInterval = setInterval(() => {
+          const videoContainer = document.querySelector(SELECTORS.VIDEO_CONTAINER);
+          if (videoContainer) {
+            clearInterval(checkInterval);
+            resolve();
+          }
+        }, TIMING.CHECK_SUBTITLE_INTERVAL);
+      });
+    } else {
+      return new Promise((resolve) => {
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', () => resolve(), { once: true });
+        } else {
           resolve();
         }
-      }, TIMING.CHECK_SUBTITLE_INTERVAL);
-    });
+      });
+    }
   }
 
   /**
