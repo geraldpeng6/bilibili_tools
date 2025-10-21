@@ -13,7 +13,7 @@ export const TIMING = {
   SUBTITLE_ACTIVATION_DELAY: 1500,    // 激活字幕的延迟
   SUBTITLE_CAPTURE_DELAY: 500,        // 捕获字幕的延迟
   MENU_OPEN_DELAY: 500,               // 打开菜单的延迟
-  CLOSE_SUBTITLE_DELAY: 100,          // 关闭字幕显示的延迟
+  CLOSE_SUBTITLE_DELAY: 1000,         // 关闭字幕显示的延迟（延长以保证切换成功）
   VIDEO_SWITCH_DELAY: 2000,           // 视频切换后的延迟
   AUTO_ACTIONS_DELAY: 500,            // 自动操作的延迟
   

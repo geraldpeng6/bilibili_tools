@@ -4,6 +4,7 @@
  */
 
 import state from '../state/StateManager.js';
+import logger from '../utils/DebugLogger.js';
 import eventBus from '../utils/EventBus.js';
 import performanceMonitor from '../utils/PerformanceMonitor.js';
 import { EVENTS, TIMING, SELECTORS, BALL_STATUS } from '../constants.js';
@@ -78,6 +79,10 @@ class SubtitleService {
         // 验证字幕数据
         const validation = validateSubtitleData(subtitleData);
         if (!validation.valid) {
+          logger.error('SubtitleService', '字幕验证失败:', validation.error);
+          if (validation.details) {
+            logger.error('SubtitleService', '验证详情:', validation.details);
+          }
           throw new Error(validation.error);
         }
 
@@ -86,7 +91,7 @@ class SubtitleService {
         state.setBallStatus(BALL_STATUS.ACTIVE);
 
       } catch (error) {
-        console.error('[SubtitleService] 字幕获取失败:', error);
+        logger.error('SubtitleService', '字幕获取失败:', error);
         state.setBallStatus(BALL_STATUS.ERROR);
         eventBus.emit(EVENTS.SUBTITLE_FAILED, error.message);
       } finally {

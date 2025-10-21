@@ -37,6 +37,7 @@ import { getVideoInfo, delay } from './utils/helpers.js';
 import performanceMonitor from './utils/PerformanceMonitor.js';
 import resourceManager from './utils/ResourceManager.js';
 import audioContextPool from './utils/AudioContextPool.js';
+import logger from './utils/DebugLogger.js';
 
 // 导入常量
 import { EVENTS, TIMING, SELECTORS, BALL_STATUS } from './constants.js';
@@ -162,6 +163,15 @@ class BilibiliSubtitleExtractor {
 
     GM_registerMenuCommand('关于', () => {
       notification.info('Bilibili Tools v1.0.0 - by geraldpeng & claude 4.5 sonnet');
+    });
+
+    // 调试模式切换
+    GM_registerMenuCommand(`🔧 调试模式 (${logger.isDebugMode() ? '开启' : '关闭'})`, () => {
+      const newState = logger.toggleDebugMode();
+      notification.info(`调试模式已${newState ? '开启' : '关闭'}`);
+      if (newState) {
+        notification.info('调试模式已开启，控制台将输出详细日志');
+      }
     });
 
     GM_registerMenuCommand('性能报告', () => {

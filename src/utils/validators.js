@@ -105,24 +105,57 @@ export function validateVideoInfo(videoInfo) {
 /**
  * 验证字幕数据
  * @param {Array} subtitleData - 字幕数据数组
- * @returns {{valid: boolean, error: string|null}}
+ * @returns {{valid: boolean, error: string|null, details: object|null}}
  */
 export function validateSubtitleData(subtitleData) {
   if (!Array.isArray(subtitleData)) {
-    return { valid: false, error: '字幕数据格式错误' };
+    return { 
+      valid: false, 
+      error: '字幕数据格式错误：非数组类型', 
+      details: { 
+        actualType: typeof subtitleData,
+        value: subtitleData 
+      }
+    };
   }
   
   if (subtitleData.length === 0) {
-    return { valid: false, error: '字幕数据为空' };
+    return { 
+      valid: false, 
+      error: '字幕数据为空', 
+      details: { 
+        length: 0 
+      }
+    };
   }
   
   // 检查第一条字幕的格式
   const first = subtitleData[0];
-  if (!first.from || !first.to || !first.content) {
-    return { valid: false, error: '字幕数据格式不完整' };
+  const missingFields = [];
+  
+  if (first.from === undefined || first.from === null) {
+    missingFields.push('from');
+  }
+  if (first.to === undefined || first.to === null) {
+    missingFields.push('to');
+  }
+  if (!first.content) {
+    missingFields.push('content');
   }
   
-  return { valid: true, error: null };
+  if (missingFields.length > 0) {
+    return { 
+      valid: false, 
+      error: `字幕数据格式不完整，缺少字段: ${missingFields.join(', ')}`,
+      details: {
+        missingFields,
+        firstItem: first,
+        itemKeys: Object.keys(first || {})
+      }
+    };
+  }
+  
+  return { valid: true, error: null, details: null };
 }
 
 /**
