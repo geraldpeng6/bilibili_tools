@@ -5,6 +5,7 @@
 
 import state from '../state/StateManager.js';
 import config from '../config/ConfigManager.js';
+import shortcutManager from '../config/ShortcutManager.js';
 import aiService from '../services/AIService.js';
 import notionService from '../services/NotionService.js';
 import subtitleService from '../services/SubtitleService.js';
@@ -16,9 +17,10 @@ import notesPanel from './NotesPanel.js';
 import modalManager from '../utils/ModalManager.js';
 import domCache from '../utils/DOMCache.js';
 import searchIndex from '../utils/SearchIndex.js';
-import performanceMonitor from '../utils/PerformanceMonitor.js';
 import { SELECTORS, AI_API_KEY_URLS } from '../constants.js';
+import logger from '../utils/DebugLogger.js';
 import { debounce, throttleRAF, findSubtitleIndex } from '../utils/helpers.js';
+import { subtitleScrollManager } from '../utils/SubtitleScrollManager.js';
 
 class EventHandlers {
   constructor() {
@@ -51,18 +53,19 @@ class EventHandlers {
     this.notionConfigModalProxy = {
       hide: () => this.hideNotionConfigModal()
     };
+    // 快捷键配置模态框代理
+    this.shortcutConfigModalProxy = {
+      hide: () => this.hideShortcutConfigModal()
+    };
   }
 
   /**
-   * 初始化字幕搜索索引
-   * @param {Array} subtitleData - 字幕数据
+   * 初始化搜索索引
    */
   initializeSearchIndex(subtitleData) {
     if (subtitleData && subtitleData.length > 0) {
-      performanceMonitor.measure('构建搜索索引', () => {
-        searchIndex.buildIndex(subtitleData);
-        this.searchIndexBuilt = true;
-      });
+      searchIndex.buildIndex(subtitleData);
+      this.searchIndexBuilt = true;
     }
   }
 
@@ -71,27 +74,107 @@ class EventHandlers {
    * @param {HTMLElement} container - 字幕容器
    */
   bindSubtitlePanelEvents(container) {
+    // 恢复保存的位置和尺寸
+    this.restoreContainerState(container);
+    
+    // 绑定拖动功能
+    this.bindDragEvents(container);
+    
+    // 绑定调整大小功能
+    this.bindResizeEvents(container);
+    
+    // 监听尺寸变化并保存
+    this.observeContainerResize(container);
+    
     // 关闭按钮
     const closeBtn = container.querySelector('.subtitle-close');
     if (closeBtn) {
       closeBtn.addEventListener('click', () => {
         state.setPanelVisible(false);
         container.classList.remove('show');
+        // 销毁滚动管理器
+        subtitleScrollManager.destroy();
       });
     }
 
-    // AI总结按钮
+    // 标签页切换
+    const tabs = container.querySelectorAll('.subtitle-tab');
+    const panels = container.querySelectorAll('.subtitle-panel');
+    
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const targetTab = tab.getAttribute('data-tab');
+        
+        // 更新标签激活状态
+        tabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        
+        panels.forEach(panel => {
+          if (panel.id === `${targetTab}-panel`) {
+            panel.style.display = 'block';
+            
+            // 如果切换到字幕列表标签，初始化滚动管理器
+            if (targetTab === 'subtitles') {
+              const subtitleListContainer = panel.querySelector('#subtitle-list-container');
+              if (subtitleListContainer && !subtitleScrollManager.container) {
+                this.initSubtitleScroll(subtitleListContainer);
+              }
+            }
+          } else {
+            panel.style.display = 'none';
+          }
+        });
+      });
+    });
+
+    // AI总结按钮（同时生成总结和段落）
     const aiIcon = container.querySelector('.ai-icon');
     if (aiIcon) {
       aiIcon.addEventListener('click', async (e) => {
         e.stopPropagation();
+        
         const subtitleData = state.getSubtitleData();
-        if (subtitleData) {
-          try {
-            await aiService.summarize(subtitleData, false);
-          } catch (error) {
-            notification.handleError(error, 'AI总结');
+        if (!subtitleData || subtitleData.length === 0) {
+          notification.error('没有可用的字幕数据');
+          return;
+        }
+        
+        // 检查是否有选中的AI配置
+        const selectedConfig = config.getSelectedAIConfig();
+        if (!selectedConfig) {
+          notification.warning('请先在油猴菜单中AI配置中选择或配置一个AI服务');
+          return;
+        }
+        
+        try {
+          // 直接触发AI总结（会同时生成markdown总结和JSON段落）
+          await aiService.summarize(subtitleData, false);
+          
+          // 自动切换到总结标签页
+          const summaryTab = container?.querySelector('.subtitle-tab[data-tab="summary"]');
+          if (summaryTab) {
+            summaryTab.click();
           }
+        } catch (error) {
+          notification.handleError(error, 'AI总结');
+        }
+      });
+    }
+
+
+    // 进度条开关
+    const progressSwitch = container.querySelector('#progress-switch');
+    if (progressSwitch) {
+      progressSwitch.addEventListener('click', () => {
+        progressSwitch.classList.toggle('on');
+        const isOn = progressSwitch.classList.contains('on');
+        
+        if (isOn) {
+          // 在进度条上添加要点标记
+          this.addProgressBarMarkers(container);
+        } else {
+          // 移除进度条标记
+          this.removeProgressBarMarkers();
         }
       });
     }
@@ -126,20 +209,10 @@ class EventHandlers {
       });
     }
 
-    // 展开/收起按钮
-    const toggleBtn = container.querySelector('#subtitle-toggle-btn');
-    const listContainer = container.querySelector('#subtitle-list-container');
-    if (toggleBtn && listContainer) {
-      toggleBtn.addEventListener('click', () => {
-        const wasExpanded = listContainer.classList.contains('expanded');
-        listContainer.classList.toggle('expanded');
-        toggleBtn.classList.toggle('expanded');
-        
-        // 如果是从收起变为展开，则自动滚动到当前播放的字幕
-        if (!wasExpanded) {
-          this.scrollToCurrentSubtitle(container);
-        }
-      });
+    // 初始化字幕滚动
+    const subtitleListContainer = container.querySelector('#subtitle-list-container');
+    if (subtitleListContainer) {
+      this.initSubtitleScroll(subtitleListContainer);
     }
 
     // 搜索输入框 - 使用防抖优化
@@ -179,8 +252,61 @@ class EventHandlers {
       });
     }
 
-    // 使用事件委托处理字幕项点击和保存按钮（优化：减少事件监听器）
+    // 使用事件委托处理字幕项点击、段落点击和保存按钮（优化：减少事件监听器）
     container.addEventListener('click', (e) => {
+      // 首先处理段落元素点击（AI时间戳段落）
+      const sectionItem = e.target.closest('.section-item');
+      if (sectionItem) {
+        e.stopPropagation();
+        
+        // 清除文字选择，防止与笔记功能冲突
+        const selection = window.getSelection();
+        if (selection) {
+          selection.removeAllRanges();
+        }
+        
+        logger.info('EventHandlers', '段落元素被点击');
+        
+        // 获取时间戳
+        const timeStr = sectionItem.getAttribute('data-time');
+        logger.info('EventHandlers', '时间戳字符串:', timeStr);
+        
+        if (timeStr) {
+          // 解析时间戳 [MM:SS] 或 [HH:MM:SS]
+          let timeInSeconds = 0;
+          const bracketMatch = timeStr.match(/\[?(\d{1,2}):(\d{2})(?::(\d{2}))?\]?/);
+          
+          if (bracketMatch) {
+            const [_, firstPart, secondPart, thirdPart] = bracketMatch;
+            if (thirdPart) {
+              // HH:MM:SS 格式
+              timeInSeconds = parseInt(firstPart) * 3600 + parseInt(secondPart) * 60 + parseInt(thirdPart);
+            } else {
+              // MM:SS 格式
+              timeInSeconds = parseInt(firstPart) * 60 + parseInt(secondPart);
+            }
+            
+            logger.info('EventHandlers', '解析后的秒数:', timeInSeconds);
+            
+            // 跳转视频 - 与字幕项完全相同的方式
+            const video = document.querySelector(SELECTORS.VIDEO);
+            if (video) {
+              video.currentTime = timeInSeconds;
+              
+              const displayTime = timeStr.replace(/[\[\]]/g, '');
+              notification.show(`跳转到 ${displayTime}`, 'info');
+              
+              // 添加点击动画
+              sectionItem.classList.add('clicked');
+              setTimeout(() => {
+                sectionItem.classList.remove('clicked');
+              }, 300);
+            }
+          }
+        }
+        return;
+      }
+      
       // 处理保存笔记按钮
       const saveBtn = e.target.closest('.save-subtitle-note-btn');
       if (saveBtn) {
@@ -432,75 +558,48 @@ class EventHandlers {
   }
 
   /**
-   * 滚动到当前播放的字幕（使用DOM缓存优化）
-   * @param {HTMLElement} container - 字幕容器
-   */
-  scrollToCurrentSubtitle(container) {
-    setTimeout(() => {
-      // 使用DOM缓存获取视频元素
-      const video = domCache.get(SELECTORS.VIDEO);
-      if (!video) return;
-
-      const currentTime = video.currentTime;
-      const items = container.querySelectorAll('.subtitle-item');
-
-      for (const item of items) {
-        const from = parseFloat(item.dataset.from);
-        const to = parseFloat(item.dataset.to);
-
-        if (currentTime >= from && currentTime <= to) {
-          item.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          break;
-        }
-      }
-    }, 100);
-  }
-
-  /**
-   * 处理搜索（集成性能监控和搜索索引）
+   * 处理搜索功能（集成性能监控和搜索索引）
    * @param {HTMLElement} container - 字幕容器
    * @param {string} searchTerm - 搜索词
    */
   handleSearch(container, searchTerm) {
-    performanceMonitor.measure('字幕搜索', () => {
-      this.searchTerm = searchTerm.trim();
-      
-      // 清除之前的高亮
-      this.clearSearchHighlights(container);
-      
-      if (!this.searchTerm) {
-        this.updateSearchCounter(0, 0);
-        this.lastSearchTerm = '';
-        return;
-      }
+    this.searchTerm = searchTerm.trim();
+    
+    // 清除之前的高亮
+    this.clearSearchHighlights(container);
+    
+    if (!this.searchTerm) {
+      this.updateSearchCounter(0, 0);
+      this.lastSearchTerm = '';
+      return;
+    }
 
-      // 构建搜索索引（首次搜索时）
-      if (!this.searchIndexBuilt) {
-        const subtitleData = state.getSubtitleData();
-        if (subtitleData) {
-          searchIndex.buildIndex(subtitleData);
-          this.searchIndexBuilt = true;
-        }
+    // 构建搜索索引（首次搜索时）
+    if (!this.searchIndexBuilt) {
+      const subtitleData = state.getSubtitleData();
+      if (subtitleData) {
+        searchIndex.buildIndex(subtitleData);
+        this.searchIndexBuilt = true;
       }
+    }
 
-      // 在AI总结和字幕中搜索并高亮
-      this.searchMatches = [];
-      this.highlightSearchInContainer(container);
-      
-      // 更新计数器
-      this.updateSearchCounter(
-        this.searchMatches.length > 0 ? 1 : 0,
-        this.searchMatches.length
-      );
-      
-      // 如果有匹配，跳转到第一个
-      if (this.searchMatches.length > 0) {
-        this.currentMatchIndex = 0;
-        this.scrollToMatch(this.searchMatches[0]);
-      }
+    // 在AI总结和字幕中搜索并高亮
+    this.searchMatches = [];
+    this.highlightSearchInContainer(container);
+    
+    // 更新计数器
+    this.updateSearchCounter(
+      this.searchMatches.length > 0 ? 1 : 0,
+      this.searchMatches.length
+    );
+    
+    // 如果有匹配，跳转到第一个
+    if (this.searchMatches.length > 0) {
+      this.currentMatchIndex = 0;
+      this.scrollToMatch(this.searchMatches[0]);
+    }
 
-      this.lastSearchTerm = this.searchTerm;
-    });
+    this.lastSearchTerm = this.searchTerm;
   }
 
   /**
@@ -636,10 +735,10 @@ class EventHandlers {
       counter.textContent = `${current}/${total}`;
     }
 
-    // 显示/隐藏搜索导航
-    const searchNav = document.getElementById('search-nav');
-    if (searchNav) {
-      searchNav.style.display = total > 0 ? 'flex' : 'none';
+    // 显示/隐藏搜索控制
+    const searchControls = document.getElementById('search-controls');
+    if (searchControls) {
+      searchControls.style.display = total > 0 ? 'flex' : 'none';
     }
 
     const prevBtn = document.getElementById('search-prev');
@@ -708,7 +807,8 @@ class EventHandlers {
     const urlEl = document.getElementById('ai-config-url');
     const apikeyEl = document.getElementById('ai-config-apikey');
     const modelEl = document.getElementById('ai-config-model');
-    const promptEl = document.getElementById('ai-config-prompt');
+    const prompt1El = document.getElementById('ai-config-prompt1');
+    const prompt2El = document.getElementById('ai-config-prompt2');
     const openrouterEl = document.getElementById('ai-config-is-openrouter');
     const saveNewBtn = document.getElementById('ai-save-new-btn');
     const updateBtn = document.getElementById('ai-update-btn');
@@ -719,15 +819,8 @@ class EventHandlers {
     if (urlEl) urlEl.value = 'https://openrouter.ai/api/v1/chat/completions';
     if (apikeyEl) apikeyEl.value = '';
     if (modelEl) modelEl.value = 'alibaba/tongyi-deepresearch-30b-a3b:free';
-    if (promptEl) promptEl.value = `请用中文总结以下视频字幕内容，使用Markdown格式输出。
-
-要求：
-1. 在开头提供TL;DR（不超过50字的核心摘要）
-2. 使用标题、列表等Markdown格式组织内容
-3. 突出关键信息和要点
-
-字幕内容：
-`;
+    if (prompt1El) prompt1El.value = '';
+    if (prompt2El) prompt2El.value = '';
     if (openrouterEl) openrouterEl.checked = true;
     if (saveNewBtn) saveNewBtn.style.display = '';
     if (updateBtn) updateBtn.style.display = 'none';
@@ -770,6 +863,222 @@ class EventHandlers {
   }
 
   /**
+   * 显示快捷键配置模态框
+   */
+  showShortcutConfigModal() {
+    try {
+      logger.debug('EventHandlers', '显示快捷键配置模态框');
+      
+      // 检查是否已存在模态框
+      const existingModal = document.getElementById('shortcut-config-modal');
+      if (existingModal) {
+        existingModal.classList.add('show');
+        // 确保注册到模态管理器
+        modalManager.push(this.shortcutConfigModalProxy);
+        return;
+      }
+      
+      // 创建并添加模态框
+      const modalHtml = uiRenderer.renderShortcutConfigModal();
+      if (!modalHtml) {
+        console.error('[EventHandlers] 无法生成快捷键配置模态框HTML');
+        notification.error('无法打开快捷键设置');
+        return;
+      }
+      
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = modalHtml;
+      const modal = tempDiv.firstElementChild;
+      if (!modal) {
+        console.error('[EventHandlers] 无法创建模态框元素');
+        notification.error('无法创建快捷键设置界面');
+        return;
+      }
+      
+      document.body.appendChild(modal);
+
+      // 显示模态框
+      requestAnimationFrame(() => {
+        modal.classList.add('show');
+        // 添加到模态管理器（使用push而不是register）
+        modalManager.push(this.shortcutConfigModalProxy);
+      });
+
+      // 绑定事件
+      this.bindShortcutConfigModalEvents(modal);
+      logger.debug('EventHandlers', '快捷键配置模态框已显示');
+    } catch (error) {
+      console.error('[EventHandlers] 显示快捷键配置模态框失败:', error);
+      notification.error('打开快捷键设置失败: ' + error.message);
+    }
+  }
+
+  /**
+   * 隐藏快捷键配置模态框
+   */
+  hideShortcutConfigModal() {
+    const modal = document.getElementById('shortcut-config-modal');
+    if (modal) {
+      modal.classList.remove('show');
+      // 从模态管理器中移除（使用pop而不是unregister）
+      modalManager.pop(this.shortcutConfigModalProxy);
+      // 延迟移除DOM元素，等动画完成
+      setTimeout(() => {
+        if (modal && modal.parentNode) {
+          modal.parentNode.removeChild(modal);
+        }
+      }, 300);
+    }
+  }
+
+  /**
+   * 绑定快捷键配置模态框事件
+   * @param {HTMLElement} modal - 快捷键配置模态框
+   */
+  bindShortcutConfigModalEvents(modal) {
+    // 关闭按钮
+    const closeBtn = modal.querySelector('.config-modal-close');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        this.hideShortcutConfigModal();
+      });
+    }
+
+    // 点击背景关闭
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        this.hideShortcutConfigModal();
+      }
+    });
+
+    // 单个快捷键输入框
+    const shortcutInputs = modal.querySelectorAll('.shortcut-input');
+    shortcutInputs.forEach(input => {
+      input.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.startShortcutCapture(input);
+      });
+    });
+
+    // 单个重置按钮
+    const resetBtns = modal.querySelectorAll('.shortcut-reset-btn');
+    resetBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.key;
+        const ShortcutManagerClass = shortcutManager.constructor;
+        const defaults = ShortcutManagerClass.DEFAULT_SHORTCUTS || {};
+        if (defaults[key]) {
+          shortcutManager.updateShortcut(key, defaults[key]);
+          const input = modal.querySelector(`.shortcut-input[data-key="${key}"]`);
+          if (input) {
+            input.value = shortcutManager.formatShortcut(defaults[key]);
+          }
+          notification.success('已重置到默认值');
+        }
+      });
+    });
+
+    // 重置所有快捷键
+    const resetAllBtn = modal.querySelector('#reset-all-shortcuts');
+    if (resetAllBtn) {
+      resetAllBtn.addEventListener('click', () => {
+        if (confirm('确定要重置所有快捷键到默认值吗？')) {
+          shortcutManager.resetToDefaults();
+          notification.success('快捷键已重置到默认值');
+          // 重新渲染
+          this.hideShortcutConfigModal();
+          this.showShortcutConfigModal();
+        }
+      });
+    }
+  }
+
+  /**
+   * 开始录制快捷键
+   * @param {HTMLElement} input - 输入框元素
+   */
+  startShortcutCapture(input) {
+    const shortcutKey = input.dataset.key;
+    input.classList.add('recording');
+    input.value = '按下快捷键...';
+
+    let doubleClickTimer = null;
+    let lastKeyCode = '';
+
+    const handleKeydown = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      
+      // ESC取消
+      if (event.key === 'Escape') {
+        input.classList.remove('recording');
+        input.value = shortcutManager.formatShortcut(shortcutManager.getAllShortcuts()[shortcutKey]);
+        document.removeEventListener('keydown', handleKeydown);
+        return;
+      }
+
+      // 检测双击
+      if (shortcutKey === 'takeScreenshot' && event.code === 'Slash') {
+        if (lastKeyCode === 'Slash' && doubleClickTimer) {
+          clearTimeout(doubleClickTimer);
+          const newConfig = {
+            key: 'Slash',
+            ctrl: false,
+            alt: false,
+            shift: false,
+            doubleClick: true
+          };
+          
+          const result = shortcutManager.updateShortcut(shortcutKey, newConfig);
+          if (result.success) {
+            input.value = shortcutManager.formatShortcut(newConfig);
+            notification.success('快捷键已更新');
+          }
+          input.classList.remove('recording');
+          document.removeEventListener('keydown', handleKeydown);
+        } else {
+          lastKeyCode = 'Slash';
+          doubleClickTimer = setTimeout(() => {
+            doubleClickTimer = null;
+            lastKeyCode = '';
+          }, 300);
+        }
+        return;
+      }
+
+      // 其他普通快捷键
+      const newConfig = {
+        key: event.code || event.key,
+        ctrl: event.ctrlKey || event.metaKey,
+        alt: event.altKey,
+        shift: event.shiftKey,
+        doubleClick: false
+      };
+
+      // 检查冲突
+      const conflict = shortcutManager.checkConflict(shortcutKey, newConfig);
+      if (conflict) {
+        notification.warning(`与"${conflict}"冲突，请重新设置`);
+        input.value = shortcutManager.formatShortcut(shortcutManager.getAllShortcuts()[shortcutKey]);
+      } else {
+        const result = shortcutManager.updateShortcut(shortcutKey, newConfig);
+        if (result.success) {
+          input.value = shortcutManager.formatShortcut(newConfig);
+          notification.success('快捷键已更新');
+        } else {
+          notification.error(result.error);
+          input.value = shortcutManager.formatShortcut(shortcutManager.getAllShortcuts()[shortcutKey]);
+        }
+      }
+
+      input.classList.remove('recording');
+      document.removeEventListener('keydown', handleKeydown);
+    };
+
+    document.addEventListener('keydown', handleKeydown);
+  }
+
+  /**
    * 绑定AI配置模态框事件
    * @param {HTMLElement} modal - AI配置模态框
    */
@@ -808,6 +1117,42 @@ class EventHandlers {
             formEl.classList.remove('hidden');
           }
           this.loadConfigToForm(id);
+        }
+      });
+    }
+
+    // 开始总结按钮
+    const startSummaryBtn = document.getElementById('ai-start-summary-btn');
+    if (startSummaryBtn) {
+      startSummaryBtn.addEventListener('click', async () => {
+        const subtitleData = state.getSubtitleData();
+        if (!subtitleData || subtitleData.length === 0) {
+          notification.error('没有可用的字幕数据');
+          return;
+        }
+        
+        // 检查是否有选中的AI配置
+        const selectedConfig = config.getSelectedAIConfig();
+        if (!selectedConfig) {
+          notification.warning('请先选择或配置一个AI服务');
+          return;
+        }
+        
+        // 隐藏模态框
+        this.hideAIConfigModal();
+        
+        try {
+          // 触发AI总结（会同时生成markdown总结和JSON段落）
+          await aiService.summarize(subtitleData, false);
+          
+          // 自动切换到总结标签页
+          const container = document.getElementById('subtitle-container');
+          const summaryTab = container?.querySelector('.subtitle-tab[data-tab="summary"]');
+          if (summaryTab) {
+            summaryTab.click();
+          }
+        } catch (error) {
+          notification.handleError(error, 'AI总结');
         }
       });
     }
@@ -885,7 +1230,8 @@ class EventHandlers {
     const urlEl = document.getElementById('ai-config-url');
     const apikeyEl = document.getElementById('ai-config-apikey');
     const modelEl = document.getElementById('ai-config-model');
-    const promptEl = document.getElementById('ai-config-prompt');
+    const prompt1El = document.getElementById('ai-config-prompt1');
+    const prompt2El = document.getElementById('ai-config-prompt2');
     const openrouterEl = document.getElementById('ai-config-is-openrouter');
     const saveNewBtn = document.getElementById('ai-save-new-btn');
     const updateBtn = document.getElementById('ai-update-btn');
@@ -895,7 +1241,9 @@ class EventHandlers {
     if (urlEl) urlEl.value = cfg.url;
     if (apikeyEl) apikeyEl.value = cfg.apiKey;
     if (modelEl) modelEl.value = cfg.model;
-    if (promptEl) promptEl.value = cfg.prompt;
+    // 设置两个提示词字段
+    if (prompt1El) prompt1El.value = cfg.prompt1 || '';
+    if (prompt2El) prompt2El.value = cfg.prompt2 || '';
     if (openrouterEl) openrouterEl.checked = cfg.isOpenRouter || false;
 
     // 显示API Key获取链接
@@ -953,7 +1301,8 @@ class EventHandlers {
       url: document.getElementById('ai-config-url').value.trim(),
       apiKey: document.getElementById('ai-config-apikey').value.trim(),
       model: document.getElementById('ai-config-model').value.trim(),
-      prompt: document.getElementById('ai-config-prompt').value,
+      prompt1: document.getElementById('ai-config-prompt1').value,
+      prompt2: document.getElementById('ai-config-prompt2').value,
       isOpenRouter: document.getElementById('ai-config-is-openrouter').checked
     };
 
@@ -980,7 +1329,8 @@ class EventHandlers {
       url: document.getElementById('ai-config-url').value.trim(),
       apiKey: document.getElementById('ai-config-apikey').value.trim(),
       model: document.getElementById('ai-config-model').value.trim(),
-      prompt: document.getElementById('ai-config-prompt').value,
+      prompt1: document.getElementById('ai-config-prompt1').value,
+      prompt2: document.getElementById('ai-config-prompt2').value,
       isOpenRouter: document.getElementById('ai-config-is-openrouter').checked
     };
 
@@ -1129,6 +1479,162 @@ class EventHandlers {
   }
 
   /**
+   * 在进度条上添加要点标记
+   * @param {HTMLElement} container - 字幕容器
+   */
+  addProgressBarMarkers(container) {
+    // 获取所有要点的时间戳
+    const sectionItems = container.querySelectorAll('.section-item[data-time]');
+    const video = document.querySelector('video');
+    const progressBar = document.querySelector('.bpx-player-progress-wrap');
+    
+    if (!video || !progressBar) return;
+    
+    const videoDuration = video.duration;
+    if (!videoDuration) return;
+    
+    // 创建要点标记容器
+    let markersContainer = progressBar.querySelector('.ai-points-container');
+    if (!markersContainer) {
+      markersContainer = document.createElement('div');
+      markersContainer.className = 'ai-points-container';
+      progressBar.appendChild(markersContainer);
+    }
+    
+    // 清空旧的标记
+    markersContainer.innerHTML = '';
+    
+    // 为每个要点添加标记
+    sectionItems.forEach(item => {
+      const timeStr = item.getAttribute('data-time');
+      if (!timeStr) return;
+      
+      // 解析时间戳 [MM:SS]
+      const match = timeStr.match(/\[(\d{1,2}):(\d{2})\]/);
+      if (!match) return;
+      
+      const minutes = parseInt(match[1]);
+      const seconds = parseInt(match[2]);
+      const timeInSeconds = minutes * 60 + seconds;
+      
+      // 计算位置百分比
+      const percentage = (timeInSeconds / videoDuration) * 100;
+      
+      // 创建标记元素（圆点）
+      const marker = document.createElement('span');
+      marker.className = 'bpx-player-progress-point bpx-player-progress-point-aipoint';
+      marker.style.cssText = `left: ${percentage}%;`;
+      marker.setAttribute('data-time', timeInSeconds);
+      
+      // 添加点击事件
+      marker.addEventListener('click', () => {
+        video.currentTime = timeInSeconds;
+      });
+      
+      markersContainer.appendChild(marker);
+    });
+    
+    // 添加样式
+    this._addProgressBarStyles();
+  }
+  
+  /**
+   * 移除进度条标记
+   */
+  removeProgressBarMarkers() {
+    const markersContainer = document.querySelector('.ai-points-container');
+    if (markersContainer) {
+      markersContainer.remove();
+    }
+  }
+  
+  /**
+   * 添加进度条标记样式
+   * @private
+   */
+  _addProgressBarStyles() {
+    if (document.querySelector('#ai-progress-styles')) return;
+    
+    const style = document.createElement('style');
+    style.id = 'ai-progress-styles';
+    style.textContent = `
+      .ai-points-container {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 5;
+      }
+      
+      .bpx-player-progress-point-aipoint {
+        position: absolute;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: 8px;
+        height: 8px;
+        background: #ff69b4;
+        border: 2px solid rgba(255, 255, 255, 0.9);
+        border-radius: 50%;
+        opacity: 0.9;
+        pointer-events: auto;
+        cursor: pointer;
+        transition: all 0.2s;
+        box-shadow: 0 0 4px rgba(255, 105, 180, 0.6);
+      }
+      
+      .bpx-player-progress-point-aipoint:hover {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1.5);
+        box-shadow: 0 0 8px rgba(255, 105, 180, 0.9);
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  /**
+   * 初始化字幕滚动管理
+   * @param {HTMLElement} container - 字幕列表容器
+   */
+  initSubtitleScroll(container) {
+    if (!container) {
+      logger.warn('EventHandlers', '字幕容器不存在，无法初始化滚动');
+      return;
+    }
+    
+    // 获取恢复滚动按钮
+    const followBtn = document.querySelector('#subtitle-follow-btn');
+    
+    // 初始化滚动管理器
+    subtitleScrollManager.init(container, {
+      followIntervalMs: 200,        // 200ms更新频率，更流畅
+      userScrollDetectMs: 300,      // 用户滚动检测延迟
+      scrollBehavior: 'smooth',      // 平滑滚动
+      scrollPosition: 'center',      // 始终居中显示
+      highlightClass: 'current'  // 高亮类名
+    });
+    
+    // 设置跟随状态改变回调
+    subtitleScrollManager.on('onFollowStatusChange', (isFollowing) => {
+      if (followBtn) {
+        followBtn.style.display = isFollowing ? 'none' : 'block';
+      }
+      logger.debug('字幕滚动', `跟随状态改变: ${isFollowing}`);
+    });
+    
+    // 恢复滚动按钮事件
+    if (followBtn) {
+      followBtn.addEventListener('click', () => {
+        logger.debug('字幕滚动', '点击恢复滚动');
+        subtitleScrollManager.resumeAutoFollow();
+      });
+    }
+    
+    logger.info('EventHandlers', '字幕滚动管理器初始化完成');
+  }
+
+  /**
    * 绑定Notion配置模态框事件
    * @param {HTMLElement} modal - Notion配置模态框
    */
@@ -1172,6 +1678,305 @@ class EventHandlers {
     document.getElementById('notion-cancel-btn').addEventListener('click', () => {
       this.hideNotionConfigModal();
     });
+  }
+
+  /**
+   * 恢复容器的位置和尺寸
+   * @param {HTMLElement} container - 容器元素
+   */
+  restoreContainerState(container) {
+    const saved = localStorage.getItem('subtitle-container-state');
+    if (saved) {
+      try {
+        const state = JSON.parse(saved);
+        
+        // 直接恢复保存的状态，不做位置验证
+        // 用户自己会调整到合适的位置
+        if (state.width) container.style.width = state.width;
+        if (state.height) container.style.height = state.height;
+        if (state.top) container.style.top = state.top;
+        if (state.left) container.style.left = state.left;
+        
+      } catch (error) {
+        logger.warn('EventHandlers', '恢复容器状态失败:', error);
+        // 不自动重置，保持默认位置即可
+      }
+    }
+  }
+
+  /**
+   * 解析位置值（处理px和百分比）
+   * @param {string} value - 位置值
+   * @param {number} maxValue - 最大值（视口宽度或高度）
+   * @returns {number} 像素值
+   */
+  parsePositionValue(value, maxValue) {
+    if (!value) return 0;
+    if (value.endsWith('px')) {
+      return parseInt(value);
+    } else if (value.endsWith('%')) {
+      return (parseInt(value) / 100) * maxValue;
+    }
+    return parseInt(value) || 0;
+  }
+
+  /**
+   * 重置容器到默认位置
+   * @param {HTMLElement} container - 容器元素
+   */
+  resetContainerPosition(container) {
+    // 清除保存的状态
+    localStorage.removeItem('subtitle-container-state');
+    
+    // 重置到默认位置
+    container.style.width = '500px';
+    container.style.height = '600px';
+    container.style.top = '10%';
+    container.style.left = '100%';
+    container.style.marginLeft = '10px';
+    
+    // 不自动显示面板，让用户自己决定是否显示
+    // 删除了自动添加 show 类的逻辑
+    
+    notification.success('字幕面板位置已重置');
+  }
+
+  /**
+   * 保存容器的位置和尺寸
+   * @param {HTMLElement} container - 容器元素
+   */
+  saveContainerState(container) {
+    const state = {
+      width: container.style.width || container.offsetWidth + 'px',
+      height: container.style.height || container.offsetHeight + 'px',
+      top: container.style.top || '10%',
+      left: container.style.left || '100%'
+    };
+    localStorage.setItem('subtitle-container-state', JSON.stringify(state));
+  }
+
+  /**
+   * 绑定容器拖动事件
+   * @param {HTMLElement} container - 容器元素
+   */
+  bindDragEvents(container) {
+    const header = container.querySelector('.subtitle-header');
+    if (!header) return;
+
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+    let startLeft = 0;
+    let startTop = 0;
+
+    const onMouseDown = (e) => {
+      // 如果点击的是按钮或输入框，不触发拖拽
+      if (e.target.closest('button') || 
+          e.target.closest('input') || 
+          e.target.closest('.subtitle-search-container') ||
+          e.target.closest('.ai-icon') ||
+          e.target.closest('.notion-icon') ||
+          e.target.closest('.subtitle-close')) {
+        return;
+      }
+
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+
+      // 获取当前位置
+      const rect = container.getBoundingClientRect();
+      const videoContainer = document.querySelector('.bpx-player-primary-area');
+      const videoRect = videoContainer?.getBoundingClientRect() || { left: 0, top: 0 };
+      
+      startLeft = rect.left - videoRect.left;
+      startTop = rect.top - videoRect.top;
+
+      header.style.cursor = 'grabbing';
+      e.preventDefault();
+    };
+
+    const onMouseMove = (e) => {
+      if (!isDragging) return;
+
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+
+      const newLeft = startLeft + deltaX;
+      const newTop = startTop + deltaY;
+
+      container.style.left = newLeft + 'px';
+      container.style.top = newTop + 'px';
+      container.style.marginLeft = '0';
+    };
+
+    const onMouseUp = () => {
+      if (isDragging) {
+        isDragging = false;
+        header.style.cursor = 'move';
+        this.saveContainerState(container);
+      }
+    };
+
+    header.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+
+    // 清理函数（如果需要）
+    container._dragCleanup = () => {
+      header.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+  }
+
+  /**
+   * 绑定容器调整大小事件
+   * @param {HTMLElement} container - 容器元素
+   */
+  bindResizeEvents(container) {
+    const EDGE_SIZE = 8; // 边缘检测区域大小
+    let isResizing = false;
+    let resizeDirection = '';
+    let startX = 0;
+    let startY = 0;
+    let startWidth = 0;
+    let startHeight = 0;
+    let startLeft = 0;
+    let startTop = 0;
+
+    // 获取鼠标位置对应的resize方向
+    const getResizeDirection = (e, rect) => {
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const w = rect.width;
+      const h = rect.height;
+      
+      let direction = '';
+      
+      // 检测边缘
+      if (y < EDGE_SIZE) direction += 'n';
+      else if (y > h - EDGE_SIZE) direction += 's';
+      
+      if (x < EDGE_SIZE) direction += 'w';
+      else if (x > w - EDGE_SIZE) direction += 'e';
+      
+      return direction;
+    };
+
+    // 鼠标移动时更新光标
+    const onMouseMove = (e) => {
+      if (isResizing) return;
+      
+      const rect = container.getBoundingClientRect();
+      const direction = getResizeDirection(e, rect);
+      
+      // 移除所有resize类
+      container.className = container.className.replace(/\bresize-\w+\b/g, '');
+      
+      // 如果在边缘，添加对应的resize类
+      if (direction) {
+        container.classList.add(`resize-${direction}`);
+      }
+    };
+
+    // 鼠标按下开始调整大小
+    const onMouseDown = (e) => {
+      const rect = container.getBoundingClientRect();
+      resizeDirection = getResizeDirection(e, rect);
+      
+      if (!resizeDirection) return;
+      
+      // 如果点击的是头部区域，不进行resize
+      if (e.target.closest('.subtitle-header')) return;
+      
+      isResizing = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      startWidth = container.offsetWidth;
+      startHeight = container.offsetHeight;
+      startLeft = container.offsetLeft;
+      startTop = container.offsetTop;
+      
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    // 鼠标移动调整大小
+    const onResizeMove = (e) => {
+      if (!isResizing) return;
+      
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+      
+      let newWidth = startWidth;
+      let newHeight = startHeight;
+      let newLeft = startLeft;
+      let newTop = startTop;
+      
+      // 根据方向调整
+      if (resizeDirection.includes('e')) {
+        newWidth = Math.max(400, Math.min(800, startWidth + deltaX));
+      }
+      if (resizeDirection.includes('w')) {
+        const widthDiff = startWidth - deltaX;
+        newWidth = Math.max(400, Math.min(800, widthDiff));
+        // 调整左边时，需要同时调整位置保持右边不动
+        newLeft = startLeft + (startWidth - newWidth);
+      }
+      if (resizeDirection.includes('s')) {
+        newHeight = Math.max(400, Math.min(window.innerHeight * 0.9, startHeight + deltaY));
+      }
+      if (resizeDirection.includes('n')) {
+        const heightDiff = startHeight - deltaY;
+        newHeight = Math.max(400, Math.min(window.innerHeight * 0.9, heightDiff));
+        // 调整上边时，需要同时调整位置保持底边不动
+        newTop = startTop + (startHeight - newHeight);
+      }
+      
+      container.style.width = newWidth + 'px';
+      container.style.height = newHeight + 'px';
+      container.style.left = newLeft + 'px';
+      container.style.top = newTop + 'px';
+    };
+
+    // 鼠标释放
+    const onMouseUp = () => {
+      if (isResizing) {
+        isResizing = false;
+        resizeDirection = '';
+        this.saveContainerState(container);
+      }
+    };
+
+    // 绑定事件
+    container.addEventListener('mousemove', onMouseMove);
+    container.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('mousemove', onResizeMove);
+    document.addEventListener('mouseup', onMouseUp);
+
+    // 清理函数
+    container._resizeCleanup = () => {
+      container.removeEventListener('mousemove', onMouseMove);
+      container.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('mousemove', onResizeMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+  }
+
+  /**
+   * 监听容器尺寸变化
+   * @param {HTMLElement} container - 容器元素
+   */
+  observeContainerResize(container) {
+    const resizeObserver = new ResizeObserver(debounce(() => {
+      this.saveContainerState(container);
+    }, 500));
+
+    resizeObserver.observe(container);
+
+    // 保存observer以便清理
+    container._resizeObserver = resizeObserver;
   }
 }
 

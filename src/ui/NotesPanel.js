@@ -10,6 +10,10 @@ class NotesPanel {
   constructor() {
     this.panel = null;
     this.isPanelVisible = false;
+    this.filters = {
+      showText: true,      // 显示文字笔记
+      showScreenshot: true // 显示截图笔记
+    };
   }
 
   /**
@@ -55,6 +59,13 @@ class NotesPanel {
   }
 
   /**
+   * 隐藏面板（ModalManager兼容方法）
+   */
+  hide() {
+    this.hidePanel();
+  }
+
+  /**
    * 切换笔记面板显示/隐藏
    */
   togglePanel() {
@@ -70,13 +81,26 @@ class NotesPanel {
    */
   renderPanel() {
     const panel = this.createPanel();
-    const groupedNotes = notesService.getGroupedNotes();
+    const groupedNotes = this.getFilteredGroupedNotes();
+    const totalNotes = notesService.getAllNotes();
+    const textCount = totalNotes.filter(n => n.type !== 'screenshot').length;
+    const screenshotCount = totalNotes.filter(n => n.type === 'screenshot').length;
 
     const html = `
       <div class="notes-panel-content">
         <div class="notes-panel-header">
           <h2>我的笔记</h2>
           <button class="notes-panel-close">×</button>
+        </div>
+        <div class="notes-filters">
+          <label class="filter-checkbox">
+            <input type="checkbox" id="filter-text-notes" ${this.filters.showText ? 'checked' : ''}>
+            <span>文字笔记 (${textCount})</span>
+          </label>
+          <label class="filter-checkbox">
+            <input type="checkbox" id="filter-screenshot-notes" ${this.filters.showScreenshot ? 'checked' : ''}>
+            <span>截图笔记 (${screenshotCount})</span>
+          </label>
         </div>
         <div class="notes-panel-body">
           ${groupedNotes.length === 0 ? this.renderEmptyState() : groupedNotes.map(group => this.renderGroup(group)).join('')}
@@ -89,16 +113,71 @@ class NotesPanel {
   }
 
   /**
+   * 获取筛选后的分组笔记
+   */
+  getFilteredGroupedNotes() {
+    const allNotes = notesService.getAllNotes();
+    
+    // 应用筛选条件
+    const filteredNotes = allNotes.filter(note => {
+      if (note.type === 'screenshot') {
+        return this.filters.showScreenshot;
+      } else {
+        return this.filters.showText;
+      }
+    });
+
+    // 按日期分组
+    const groups = {};
+    filteredNotes.forEach(note => {
+      // 使用创建时间分组（兼容新旧数据）
+      const groupTimestamp = note.createdAt || note.timestamp;
+      const date = notesService.formatDate(groupTimestamp);
+      if (!groups[date]) {
+        groups[date] = [];
+      }
+      groups[date].push(note);
+    });
+
+    // 转换为数组并排序
+    return Object.keys(groups)
+      .sort((a, b) => {
+        // 使用创建时间排序（兼容新旧数据）
+        const dateA = groups[a][0].createdAt || groups[a][0].timestamp;
+        const dateB = groups[b][0].createdAt || groups[b][0].timestamp;
+        return dateB - dateA;
+      })
+      .map(date => ({
+        date,
+        notes: groups[date]
+      }));
+  }
+
+  /**
    * 渲染空状态
    */
   renderEmptyState() {
-    return `
-      <div class="notes-empty-state">
-        <div class="notes-empty-icon">📝</div>
-        <div>还没有保存任何笔记</div>
-        <div class="notes-empty-hint">选中文字后点击粉色点即可保存</div>
-      </div>
-    `;
+    const hasAnyNotes = notesService.getAllNotes().length > 0;
+    
+    if (hasAnyNotes) {
+      // 有笔记但被筛选隐藏了
+      return `
+        <div class="notes-empty-state">
+          <div class="notes-empty-icon">🔍</div>
+          <div>没有符合筛选条件的笔记</div>
+          <div class="notes-empty-hint">请调整上方的筛选条件</div>
+        </div>
+      `;
+    } else {
+      // 真的没有任何笔记
+      return `
+        <div class="notes-empty-state">
+          <div class="notes-empty-icon">📝</div>
+          <div>还没有保存任何笔记</div>
+          <div class="notes-empty-hint">选中文字后点击粉色点即可保存<br>或使用 Cmd+E 保存截图</div>
+        </div>
+      `;
+    }
   }
 
   /**
@@ -137,11 +216,44 @@ class NotesPanel {
       ? note.content.substring(0, 200) + '...' 
       : note.content;
 
-    return `
-      <div class="note-item" data-note-id="${note.id}">
+    // 如果是截图笔记，显示图片
+    const contentHtml = note.type === 'screenshot' && note.imageData
+      ? `
+        <div class="note-screenshot">
+          <img src="${note.imageData}" alt="视频截图" style="max-width: 100%; border-radius: 4px; margin-top: 8px;">
+        </div>
         <div class="note-content">${this.escapeHtml(displayContent)}</div>
+      `
+      : `<div class="note-content">${this.escapeHtml(displayContent)}</div>`;
+
+    // 根据笔记类型决定显示的时间和信息
+    let timeDisplay = '';
+    let videoDisplay = '';
+    
+    if (note.type === 'screenshot') {
+      // 截图显示视频时间位置
+      timeDisplay = note.timeString || notesService.formatTime(note.createdAt || note.timestamp);
+      // 显示视频信息（标题或BV号）
+      if (note.videoTitle && note.videoTitle !== '未知视频') {
+        videoDisplay = ` · ${this.escapeHtml(note.videoTitle)}`;
+      } else if (note.videoBvid) {
+        videoDisplay = ` · ${this.escapeHtml(note.videoBvid)}`;
+      }
+    } else {
+      // 普通笔记显示创建时间
+      timeDisplay = notesService.formatTime(note.timestamp);
+      if (note.videoTitle) {
+        videoDisplay = ` · ${this.escapeHtml(note.videoTitle)}`;
+      }
+    }
+
+    return `
+      <div class="note-item ${note.type === 'screenshot' ? 'note-item-screenshot' : ''}" data-note-id="${note.id}">
+        ${contentHtml}
         <div class="note-footer">
-          <div class="note-time">${notesService.formatTime(note.timestamp)}</div>
+          <div class="note-time">
+            ${note.type === 'screenshot' ? '📸 ' : ''}${timeDisplay}${videoDisplay}
+          </div>
           <div class="note-actions">
             <button class="note-copy-btn" data-note-id="${note.id}">复制</button>
             <button class="note-delete-btn" data-note-id="${note.id}">删除</button>
@@ -193,6 +305,24 @@ class NotesPanel {
     const closeBtn = this.panel.querySelector('.notes-panel-close');
     if (closeBtn) {
       closeBtn.addEventListener('click', () => this.hidePanel());
+    }
+
+    // 筛选复选框
+    const filterText = this.panel.querySelector('#filter-text-notes');
+    const filterScreenshot = this.panel.querySelector('#filter-screenshot-notes');
+    
+    if (filterText) {
+      filterText.addEventListener('change', (e) => {
+        this.filters.showText = e.target.checked;
+        this.renderPanel();
+      });
+    }
+    
+    if (filterScreenshot) {
+      filterScreenshot.addEventListener('change', (e) => {
+        this.filters.showScreenshot = e.target.checked;
+        this.renderPanel();
+      });
     }
 
     // 使用事件委托处理所有按钮点击（性能优化：从N个监听器减少到1个）

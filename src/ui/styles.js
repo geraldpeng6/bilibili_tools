@@ -82,10 +82,12 @@ export const CSS_STYLES = `
     position: absolute;
     top: 10%;
     left: 100%;
-    width: auto;
-    min-width: 420px;
-    max-width: 500px;
-    height: 80%;
+    width: 500px;
+    min-width: 400px;
+    max-width: 800px;
+    height: 600px;
+    min-height: 400px;
+    max-height: 90vh;
     background: rgba(0, 0, 0, 0.85);
     backdrop-filter: blur(12px);
     color: #fff;
@@ -97,7 +99,7 @@ export const CSS_STYLES = `
     overflow: hidden;
     box-shadow: -4px 0 24px rgba(0,0,0,0.5);
     border: 1px solid rgba(254, 235, 234, 0.2);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: none;
     z-index: ${Z_INDEX.CONTAINER};
     margin-left: 10px;
   }
@@ -105,34 +107,98 @@ export const CSS_STYLES = `
   #subtitle-container.show {
     display: flex;
   }
+  
+  /* 调整大小的边缘检测区域 */
+  #subtitle-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+  }
+  
+  /* 鼠标悬停在边缘时的光标样式 */
+  #subtitle-container.resize-n { cursor: n-resize; }
+  #subtitle-container.resize-s { cursor: s-resize; }
+  #subtitle-container.resize-e { cursor: e-resize; }
+  #subtitle-container.resize-w { cursor: w-resize; }
+  #subtitle-container.resize-ne { cursor: ne-resize; }
+  #subtitle-container.resize-nw { cursor: nw-resize; }
+  #subtitle-container.resize-se { cursor: se-resize; }
+  #subtitle-container.resize-sw { cursor: sw-resize; }
 
   /* ==================== 头部样式 ==================== */
   .subtitle-header {
-    font-size: 16px;
-    font-weight: 700;
-    padding: 20px;
-    border-bottom: 1px solid rgba(254, 235, 234, 0.2);
+    font-size: 14px;
+    font-weight: 500;
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(254, 235, 234, 0.15);
     display: flex;
     justify-content: space-between;
     align-items: center;
+    cursor: move;
+    user-select: none;
     flex-shrink: 0;
-    background: rgba(254, 235, 234, 0.15);
+    background: linear-gradient(135deg, rgba(254, 235, 234, 0.12), rgba(254, 235, 234, 0.06));
     color: #fff;
     border-radius: 12px 12px 0 0;
     user-select: none;
+  }
+
+  .subtitle-header-left {
+    display: flex;
+    align-items: center;
     gap: 12px;
   }
 
-  .subtitle-search-container {
+  .subtitle-header-right {
     display: flex;
     align-items: center;
-    gap: 6px;
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: 8px;
-    padding: 6px 10px;
-    border: 1px solid rgba(254, 235, 234, 0.2);
+    gap: 12px;
+    position: relative;
+    z-index: 10;
+  }
+
+  /* AI助手图标 - 删除边框和背景 */
+
+  .subtitle-status-icon {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .subtitle-status-text {
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .subtitle-search-box {
+    position: relative;
+    flex: 1;
+    max-width: 300px;
+    margin: 0 8px; 
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
     transition: all 0.2s;
-    max-width: 280px;
+  }
+
+  .subtitle-search-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 20px;
+    padding: 5px 12px;
+    border: 1px solid rgba(254, 235, 234, 0.15);
+    transition: all 0.2s;
+    width: 200px;
   }
 
   .subtitle-search-container:focus-within {
@@ -149,52 +215,57 @@ export const CSS_STYLES = `
     color: #fff;
     font-size: 14px;
     padding: 4px;
+    padding-right: 70px;
   }
 
   .search-input::placeholder {
     color: rgba(255, 255, 255, 0.5);
   }
 
-  .search-nav {
+  .search-controls {
+    position: absolute;
+    right: 8px;
     display: flex;
     align-items: center;
     gap: 4px;
-    flex-shrink: 0;
   }
 
   .search-counter {
-    font-size: 12px;
+    font-size: 11px;
     color: rgba(255, 255, 255, 0.6);
-    min-width: 32px;
+    min-width: 28px;
     text-align: center;
   }
 
   .search-nav-btn {
-    background: rgba(254, 235, 234, 0.2);
-    border: 1px solid rgba(254, 235, 234, 0.3);
-    border-radius: 4px;
-    color: #fff;
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
     cursor: pointer;
-    padding: 2px 6px;
-    font-size: 14px;
+    padding: 2px;
     transition: all 0.2s;
     display: flex;
     align-items: center;
     justify-content: center;
+    border-radius: 4px;
   }
 
   .search-nav-btn:hover {
-    background: rgba(254, 235, 234, 0.35);
-    border-color: #feebea;
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
   }
 
   .search-nav-btn:active {
-    transform: scale(0.95);
+    transform: scale(0.9);
   }
 
   .search-nav-btn:disabled {
     opacity: 0.3;
     cursor: not-allowed;
+  }
+  
+  .search-nav-btn svg {
+    display: block;
   }
 
   /* 搜索高亮样式 */
@@ -215,31 +286,76 @@ export const CSS_STYLES = `
 
   .subtitle-header-actions {
     display: flex;
-    gap: 16px;
+    gap: 12px;
     align-items: center;
   }
 
   .subtitle-close {
     cursor: pointer;
-    font-size: 24px;
+    font-size: 20px;
     line-height: 1;
-    color: rgba(255, 255, 255, 0.6);
-    opacity: 0.7;
+    color: rgba(255, 255, 255, 0.5);
     transition: all 0.2s;
+    padding: 4px;
+    border-radius: 4px;
   }
 
   .subtitle-close:hover {
-    opacity: 1;
+    color: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  /* ==================== 标签页样式 ==================== */
+  .subtitle-tabs {
+    display: flex;
+    padding: 0 20px;
+    gap: 20px;
+    border-bottom: 1px solid rgba(254, 235, 234, 0.1);
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  .subtitle-tab {
+    position: relative;
+    padding: 12px 4px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+  }
+
+  .subtitle-tab:hover {
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .subtitle-tab.active {
     color: #fff;
-    transform: scale(1.1);
+  }
+
+  .subtitle-tab.active::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #feebea, rgba(254, 235, 234, 0.6));
+    border-radius: 2px 2px 0 0;
   }
 
   /* ==================== 内容区域样式 ==================== */
   .subtitle-content {
     flex: 1;
     overflow-y: auto;
-    padding: 15px 20px 20px 20px;
-    background-color: transparent;
+    overflow-x: hidden;
+    height: calc(100% - 120px);
+  }
+
+  .subtitle-panel {
+    padding: 20px;
+    height: 100%;
+    overflow-y: visible;
   }
 
   .subtitle-content::-webkit-scrollbar {
@@ -294,21 +410,27 @@ export const CSS_STYLES = `
   }
 
   .subtitle-list-container {
-    display: none;
-  }
-
-  .subtitle-list-container.expanded {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: auto;
+    overflow-y: visible;
+    padding: 16px;
+    position: relative;
   }
 
   .subtitle-item {
-    margin-bottom: 6px;
-    padding: 10px 12px;
-    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 2px;
+    padding: 6px 10px;
+    border-radius: 6px;
     transition: all 0.2s;
     cursor: pointer;
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(254, 235, 234, 0.2);
+    position: relative;
   }
 
   .subtitle-item:hover {
@@ -319,22 +441,35 @@ export const CSS_STYLES = `
   }
 
   .subtitle-item.current {
-    background: rgba(254, 235, 234, 0.25);
-    border-color: #feebea;
-    box-shadow: 0 2px 12px rgba(254, 235, 234, 0.3);
+    background: rgba(254, 235, 234, 0.2) !important;
+    border-left: 3px solid #ff69b4;
+    padding-left: 9px;
+    box-shadow: 0 2px 8px rgba(255, 105, 180, 0.2);
+    animation: subtitleHighlight 1.5s ease infinite;
+  }
+  
+  @keyframes subtitleHighlight {
+    0%, 100% {
+      box-shadow: 0 2px 8px rgba(255, 105, 180, 0.2);
+    }
+    50% {
+      box-shadow: 0 2px 12px rgba(255, 105, 180, 0.4);
+    }
   }
 
   .subtitle-time {
     color: rgba(255, 255, 255, 0.6);
     font-size: 11px;
-    margin-bottom: 4px;
     font-weight: 600;
+    flex-shrink: 0;
+    min-width: 42px;
   }
 
   .subtitle-text {
     color: #e5e7eb;
     font-size: 14px;
-    line-height: 1.6;
+    line-height: 1.5;
+    flex: 1;
   }
 
   /* ==================== AI图标样式 ==================== */
@@ -426,24 +561,336 @@ export const CSS_STYLES = `
   }
 
   /* ==================== AI总结样式 ==================== */
-  .ai-summary-section {
-    padding: 15px;
-    margin-bottom: 15px;
-    background: rgba(254, 235, 234, 0.1);
-    border-radius: 12px;
-    border: 1px solid rgba(254, 235, 234, 0.3);
+  .ai-summary-tips {
+    padding: 10px 16px;
+    background: rgba(254, 235, 234, 0.08);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    margin-bottom: 16px;
   }
 
-  .ai-summary-title {
-    color: #fff;
-    font-size: 15px;
-    font-weight: 700;
+  .ai-summary-main {
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    margin-bottom: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  
+  .summary-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: rgba(255, 255, 255, 0.9);
     margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  
+  .summary-content {
+    font-size: 14px;
+    line-height: 1.8;
+    color: rgba(255, 255, 255, 0.85);
+    overflow-y: visible;
+    overflow-x: hidden;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+  
+  /* 滚动条样式已统一由 .subtitle-content 管理 */
+  
+  /* Markdown样式 - 总结区域 */
+  .summary-content h1,
+  .summary-content h2,
+  .summary-content h3,
+  .summary-content h4,
+  .summary-content h5,
+  .summary-content h6 {
+    color: rgba(255, 255, 255, 0.9) !important;
+    margin-top: 12px;
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+  
+  .summary-content h1 { font-size: 18px; }
+  .summary-content h2 { font-size: 16px; }
+  .summary-content h3 { font-size: 15px; }
+  .summary-content h4 { font-size: 14px; }
+  
+  .summary-content p {
+    margin: 8px 0;
+    color: rgba(255, 255, 255, 0.85);
+  }
+  
+  .summary-content ul,
+  .summary-content ol {
+    margin: 8px 0;
+    padding-left: 20px;
+    color: rgba(255, 255, 255, 0.85);
+  }
+  
+  .summary-content li {
+    margin: 4px 0;
+  }
+  
+  .summary-content strong {
+    color: rgba(255, 255, 255, 0.95);
+    font-weight: 600;
+  }
+  
+  .summary-content code {
+    background: rgba(255, 255, 255, 0.1);
+    color: #feebea;
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-size: 13px;
+  }
+  
+  .summary-content blockquote {
+    border-left: 3px solid #feebea;
+    background: rgba(254, 235, 234, 0.05);
+    padding: 8px 12px;
+    margin: 8px 0;
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .ai-summary-outline {
+    margin-bottom: 20px;
+  }
+
+  .progress-switch {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 8px;
+    margin-bottom: 16px;
+    border: 1px solid rgba(254, 235, 234, 0.1);
+  }
+  
+  .progress-switch span {
+    font-size: 14px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .switch-btn {
+    width: 40px;
+    height: 22px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 11px;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.3s;
+    border: 1px solid rgba(254, 235, 234, 0.2);
+  }
+
+  .switch-btn.on {
+    background: rgba(254, 235, 234, 0.3);
+    border-color: #feebea;
+  }
+
+  .switch-block {
+    width: 16px;
+    height: 16px;
+    background: #fff;
+    border-radius: 50%;
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    transition: all 0.3s;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  }
+
+  .switch-btn.on .switch-block {
+    transform: translateX(18px);
+  }
+
+  .ai-summary-sections {
+    padding: 0;
+  }
+
+  .summary-section {
+    margin-bottom: 20px;
+  }
+
+  .section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    background: rgba(254, 235, 234, 0.08);
+    border-radius: 8px;
+    border-left: 3px solid #feebea;
+  }
+
+  .section-items {
+    padding: 0;
+  }
+
+  .section-item {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid rgba(254, 235, 234, 0.3);
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+    border: 1px solid rgba(254, 235, 234, 0.1);
+    margin-bottom: 8px;
+    transition: all 0.2s ease;
+    position: relative;
+    cursor: pointer; /* 添加鼠标指针样式，表示可点击 */
+    user-select: none; /* 禁止文字选择，防止与笔记功能冲突 */
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+  }
+  
+  .section-item:hover {
+    background: rgba(254, 235, 234, 0.15);
+    border-color: #feebea;
+    transform: translateX(4px);
+    box-shadow: 0 2px 8px rgba(254, 235, 234, 0.2); /* 添加阴影效果 */
+  }
+  
+  .section-item:active {
+    transform: translateX(2px) scale(0.98); /* 点击时的反馈 */
+  }
+  
+  .section-item.clicked {
+    animation: segmentClick 0.3s ease;
+  }
+  
+  @keyframes segmentClick {
+    0% {
+      transform: scale(1);
+      background: rgba(254, 235, 234, 0.05);
+    }
+    50% {
+      transform: scale(0.98);
+      background: rgba(254, 235, 234, 0.3);
+      box-shadow: 0 0 10px rgba(254, 235, 234, 0.5);
+    }
+    100% {
+      transform: scale(1);
+      background: rgba(254, 235, 234, 0.05);
+    }
+  }
+  
+  .ai-segments-section .section-item {
+    cursor: pointer;
+  }
+  
+  .ai-segments-section .section-item:hover {
+    background: rgba(254, 235, 234, 0.2);
+  }
+  
+  .segment-item {
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  
+  .segment-item:hover {
+    background: rgba(254, 235, 234, 0.1);
+    transform: translateX(2px);
+  }
+
+  .time-btn {
+    padding: 2px 6px;
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+    min-width: 42px;
+    text-align: left;
+  }
+
+  .time-btn:hover {
+    color: #feebea;
+  }
+
+  .item-content {
+    flex: 1;
+    color: #e5e7eb;
+    font-size: 14px;
+    line-height: 1.5;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .item-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .item-desc {
+    font-size: 12px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.65);
+  }
+  
+  .item-single {
+    font-size: 14px;
+    color: #e5e7eb;
+  }
+
+  .ai-segments-section,
+  .original-subtitles-section,
+  .ai-segments-in-summary {
+    margin-bottom: 12px;
+  }
+  
+  .summary-panel-container {
+    height: auto;
+    overflow-y: visible;
+    overflow-x: hidden;
+    padding: 12px;
+  }
+  
+  /* 滚动条样式已移到 .subtitle-content */
+  
+  .ai-segments-in-summary {
+    background: #2a2a2a;
+    border-radius: 8px;
+    padding: 8px;
+  }
+
+  .segments-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.7);
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .segments-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.1);
+    margin: 16px 0;
+  }
+
+  .ai-summary-main {
+    padding-top: 8px;
+  }
+
+  .ai-summary-empty {
+    padding: 60px 20px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 14px;
   }
 
   .ai-summary-content {
@@ -458,8 +905,26 @@ export const CSS_STYLES = `
   }
 
   .ai-summary-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
     color: rgba(255, 255, 255, 0.6);
-    font-style: italic;
+  }
+
+  .loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(254, 235, 234, 0.1);
+    border-top-color: #feebea;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 16px;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
 
   /* ==================== Markdown样式 ==================== */
@@ -573,6 +1038,41 @@ export const CSS_STYLES = `
   .config-modal.show {
     display: flex;
   }
+  
+  /* 配置模态框overlay样式（用于快捷键配置等） */
+  .config-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.7);
+    z-index: ${Z_INDEX.AI_MODAL};
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .config-modal-overlay.show {
+    display: flex;
+  }
+  
+  /* 快捷键配置模态框 */
+  #shortcut-config-modal {
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(12px);
+    border-radius: 16px;
+    padding: 0;
+    width: 600px;
+    max-width: 90%;
+    max-height: 85vh;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid rgba(254, 235, 234, 0.2);
+  }
 
   .config-modal-content {
     background: rgba(0, 0, 0, 0.85);
@@ -591,16 +1091,39 @@ export const CSS_STYLES = `
   }
 
   .config-modal-header {
-    font-size: 24px;
+    padding: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(254, 235, 234, 0.15);
+    border-bottom: 1px solid rgba(254, 235, 234, 0.2);
+    border-radius: 16px 16px 0 0;
+  }
+  
+  .config-modal-title {
+    font-size: 20px;
     font-weight: 700;
-    padding: 30px 30px 20px 30px;
+    color: white;
+  }
+  
+  .config-modal-close {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 24px;
+    cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 12px;
-    background: rgba(254, 235, 234, 0.15);
-    color: white;
-    border-radius: 16px 16px 0 0;
-    border-bottom: 1px solid rgba(254, 235, 234, 0.2);
+    justify-content: center;
+    transition: all 0.2s;
+  }
+  
+  .config-modal-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
   }
   
   .config-modal-body {
@@ -1099,25 +1622,137 @@ export const CSS_STYLES = `
     border-color: #ffe5e5;
   }
 
+  /* ==================== 快捷键配置面板样式 ==================== */
+
+  .shortcut-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    transition: all 0.2s;
+  }
+
+  .shortcut-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .shortcut-description {
+    flex: 1;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .shortcut-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .shortcut-input {
+    padding: 6px 12px;
+    border: 1px solid rgba(254, 235, 234, 0.3);
+    border-radius: 6px;
+    font-size: 13px;
+    min-width: 180px;
+    text-align: center;
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .shortcut-input:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(254, 235, 234, 0.5);
+  }
+
+  .shortcut-input.recording,
+  .shortcut-input.capturing {
+    background: rgba(254, 235, 234, 0.2);
+    border-color: #feebea;
+    animation: pulse 1.5s infinite;
+  }
+
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(254, 235, 234, 0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(254, 235, 234, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(254, 235, 234, 0); }
+  }
+
+  .shortcut-reset-btn {
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .shortcut-reset-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .shortcut-config-footer {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  .shortcut-tips {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .shortcuts-icon {
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    transition: all 0.2s;
+  }
+
+  .shortcuts-icon:hover {
+    transform: rotate(45deg);
+    filter: drop-shadow(0 0 8px rgba(254, 235, 234, 0.5));
+  }
+
   /* ==================== 笔记面板样式 ==================== */
   .notes-panel {
     position: fixed;
+    right: 20px;
     top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 600px;
-    max-width: 90%;
-    height: 80vh;
+    transform: translateY(-50%);
+    width: 400px;
+    min-width: 350px;
+    max-width: 600px;
+    height: 600px;
+    min-height: 400px;
     max-height: 80vh;
-    background: rgba(0, 0, 0, 0.85);
-    backdrop-filter: blur(12px);
-    border-radius: 12px;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-    z-index: 2147483640;
+    background: rgba(32, 32, 38, 0.95);
+    backdrop-filter: blur(20px) saturate(200%);
+    border-radius: 16px;
+    box-shadow: 
+      0 20px 60px -8px rgba(255, 105, 180, 0.2),
+      0 8px 24px -4px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+    resize: both;
+    overflow: hidden;  /* 改为 hidden，只允许内部 body 滚动 */
+    z-index: ${Z_INDEX.MODAL};
     display: none;
     flex-direction: column;
-    overflow: hidden;
-    border: 1px solid rgba(254, 235, 234, 0.2);
   }
 
   .notes-panel.show {
@@ -1165,6 +1800,39 @@ export const CSS_STYLES = `
   .notes-panel-close:hover {
     background: rgba(255,255,255,0.1);
     color: #fff;
+  }
+
+  /* 笔记筛选器样式 */
+  .notes-filters {
+    display: flex;
+    gap: 20px;
+    padding: 12px 20px;
+    background: rgba(0, 0, 0, 0.2);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .filter-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .filter-checkbox input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: #feebea;
+  }
+
+  .filter-checkbox span {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 14px;
+  }
+
+  .filter-checkbox:hover span {
+    color: rgba(255, 255, 255, 0.95);
   }
 
   .notes-panel-body {
@@ -1345,13 +2013,6 @@ export const CSS_STYLES = `
   }
 
   /* ==================== 字幕项保存按钮样式 ==================== */
-  .subtitle-item-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 4px;
-  }
-
   .save-subtitle-note-btn {
     background: linear-gradient(135deg, #feebea 0%, #2d2d2d 100%);
     color: white;
@@ -1362,6 +2023,8 @@ export const CSS_STYLES = `
     cursor: pointer;
     transition: all 0.2s;
     opacity: 0;
+    flex-shrink: 0;
+    margin-left: auto;
   }
 
   .subtitle-item:hover .save-subtitle-note-btn {
@@ -1370,6 +2033,29 @@ export const CSS_STYLES = `
 
   .save-subtitle-note-btn:hover {
     transform: scale(1.05);
+  }
+  
+  .subtitle-follow-btn {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 6px 12px;
+    background: rgba(255, 105, 180, 0.8);
+    color: white;
+    border: none;
+    border-radius: 16px;
+    font-size: 12px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    transition: all 0.3s;
+    z-index: 10;
+  }
+
+  .subtitle-follow-btn:hover {
+    background: rgba(255, 105, 180, 1);
+    transform: translateX(-50%) translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   }
 
   /* ==================== 快捷键配置样式 ==================== */
@@ -1483,79 +2169,6 @@ export const CSS_STYLES = `
 
   .subtitle-resize-handle:hover::after {
     border-color: #feebea;
-  }
-
-  /* ==================== 速度控制模态框样式 ==================== */
-  .speed-control-section-large {
-    padding: 20px;
-    background: rgba(254, 235, 234, 0.1);
-    border-radius: 12px;
-    border: 1px solid rgba(254, 235, 234, 0.3);
-    margin-bottom: 20px;
-  }
-
-  .speed-control-header-large {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid rgba(254, 235, 234, 0.3);
-  }
-
-  .speed-control-display-large {
-    font-size: 32px;
-    font-weight: 700;
-    color: #fff;
-    font-family: monospace;
-  }
-
-  .speed-control-buttons-large {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
-  }
-
-  .speed-btn-large {
-    padding: 16px;
-    border: 1px solid rgba(254, 235, 234, 0.3);
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.1);
-    color: #fff;
-    cursor: pointer;
-    font-weight: 600;
-    transition: all 0.2s;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .speed-btn-large:hover {
-    background: rgba(254, 235, 234, 0.2);
-    border-color: #feebea;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(254, 235, 234, 0.3);
-  }
-
-  .speed-btn-large:active {
-    transform: translateY(0);
-  }
-
-  .speed-status-info {
-    margin-top: 12px;
-    padding: 10px;
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: 8px;
-    min-height: 40px;
-    border: 1px solid rgba(254, 235, 234, 0.2);
-  }
-
-  .speed-status-item {
-    font-size: 12px;
-    color: #4CAF50;
-    font-weight: 600;
-    padding: 4px 0;
   }
 
   .sponsor-switch {
@@ -2027,6 +2640,19 @@ export const ICONS = {
     <path d="M3 21L12 12L12.2 6.2L11 5M15 4V2M15 16V14M8 9H10M20 9H22M17.8 11.8L19 13M17.8 6.2L19 5" stroke="#feebea" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
     <circle cx="12" cy="12" r="1.5" fill="#feebea"/>
     <path d="M17 7L12 12L7 7" stroke="#feebea" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
+  </svg>`,
+  
+  AI_ASSISTANT: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <g opacity="0.8">
+      <circle cx="12" cy="15" r="6" fill="#feebea" opacity="0.3"/>
+      <path d="M12 5C7.5 5 4 8 4 12c0 3.5 2.5 6.5 6 7.5" stroke="#feebea" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M12 5C16.5 5 20 8 20 12c0 3.5-2.5 6.5-6 7.5" stroke="#feebea" stroke-width="1.5" stroke-linecap="round"/>
+      <circle cx="8" cy="10" r="1" fill="#feebea"/>
+      <circle cx="16" cy="10" r="1" fill="#feebea"/>
+      <path d="M8 14c1 1 2 1.5 4 1.5s3-0.5 4-1.5" stroke="#feebea" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M7 3L9 5" stroke="#feebea" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M17 3L15 5" stroke="#feebea" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
   </svg>`,
   
   DOWNLOAD: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">

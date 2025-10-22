@@ -1,7 +1,9 @@
 /**
  * 资源管理器
- * 统一管理所有需要清理的资源，防止内存泄漏
+ * 统一管理定时器、事件监听器等资源
  */
+
+import logger from './DebugLogger.js';
 
 class ResourceManager {
   constructor() {
@@ -82,7 +84,7 @@ class ResourceManager {
     const id = setInterval(() => {
       // 检查是否超时
       if (Date.now() - startTime > maxDuration) {
-        console.warn(`[ResourceManager] 定时器${id}运行超过${maxDuration}ms，自动清理`);
+        logger.warn('ResourceManager', `定时器${id}运行超过${maxDuration}ms，自动清理`);
         this.clearTrackedInterval(id);
         return;
       }
@@ -186,7 +188,7 @@ class ResourceManager {
     
     this.resources.intervals.forEach((info, id) => {
       if (now - info.startTime > info.maxDuration) {
-        console.warn(`[ResourceManager] 清理超时interval: ${id}, 运行了${((now - info.startTime) / 1000).toFixed(1)}秒`);
+        logger.warn('ResourceManager', `清理超时interval: ${id}, 运行了${((now - info.startTime) / 1000).toFixed(1)}秒`);
         clearInterval(id);
         toDelete.push(id);
       }
@@ -195,7 +197,7 @@ class ResourceManager {
     toDelete.forEach(id => this.resources.intervals.delete(id));
     
     if (toDelete.length > 0) {
-      console.log(`[ResourceManager] 已清理${toDelete.length}个超时定时器`);
+      logger.debug('ResourceManager', `已清理${toDelete.length}个超时定时器`);
     }
   }
 
@@ -238,11 +240,11 @@ class ResourceManager {
    */
   cleanup() {
     if (this.isDestroyed) {
-      console.warn('[ResourceManager] 已经销毁，跳过清理');
+      logger.warn('ResourceManager', '已经销毁，跳过清理');
       return;
     }
 
-    console.log('[ResourceManager] 开始清理资源...');
+    logger.debug('ResourceManager', '开始清理资源...');
 
     // 清理 EventBus 订阅
     this.resources.eventBusSubscriptions.forEach((subscriptions, module) => {
@@ -335,7 +337,7 @@ class ResourceManager {
     this.resources.customCleanups.clear();
 
     this.isDestroyed = true;
-    console.log('[ResourceManager] 资源清理完成');
+    logger.debug('ResourceManager', '资源清理完成');
   }
 
   /**

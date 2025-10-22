@@ -6,6 +6,7 @@
 import { SPONSORBLOCK, SELECTORS } from '../constants.js';
 import sponsorBlockConfig from '../config/SponsorBlockConfigManager.js';
 import { formatTime } from '../utils/helpers.js';
+import logger from '../utils/DebugLogger.js';
 
 /**
  * SponsorBlock API类
@@ -403,7 +404,7 @@ class VideoPlayerController {
     };
     this.rafId = requestAnimationFrame(loop);
 
-    console.log('[SponsorBlock] 开始监控（使用RAF）');
+    logger.debug('SponsorBlock', '开始监控（使用RAF）');
   }
 
   /**
@@ -625,7 +626,7 @@ class VideoPlayerController {
    * 销毁控制器（优化：完整清理所有资源）
    */
   destroy() {
-    console.log('[SponsorBlock] 销毁播放器控制器');
+    logger.debug('SponsorBlock', '销毁播放器控制器');
     
     // 清理 RAF
     if (this.rafId) {

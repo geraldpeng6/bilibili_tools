@@ -1,9 +1,10 @@
 /**
  * 配置管理模块
- * 统一管理AI和Notion的配置，避免重复代码
+ * 统一管理所有配置项
  */
 
 import { AI_DEFAULT_CONFIGS, STORAGE_KEYS } from '../constants.js';
+import logger from '../utils/DebugLogger.js';
 import { validateApiKey, validateApiUrl, validateNotionPageId } from '../utils/validators.js';
 
 class ConfigManager {
@@ -16,7 +17,26 @@ class ConfigManager {
     if (configs.length === 0) {
       return [...AI_DEFAULT_CONFIGS]; // 返回默认配置的副本
     }
-    return configs;
+    
+    // 迁移旧配置：将prompt字段迁移到prompt1和prompt2
+    const migratedConfigs = configs.map(config => {
+      if (config.prompt && (!config.prompt1 || !config.prompt2)) {
+        return {
+          ...config,
+          prompt1: config.prompt,
+          prompt2: this._getDefaultPrompt2(), // 使用JSON格式的默认提示词
+          prompt: undefined
+        };
+      }
+      return config;
+    });
+    
+    // 如果有迁移，保存迁移后的配置
+    if (migratedConfigs.some(c => c.prompt === undefined && configs.some(oc => oc.prompt))) {
+      this.saveAIConfigs(migratedConfigs);
+    }
+    
+    return migratedConfigs;
   }
 
   /**
@@ -83,7 +103,8 @@ class ConfigManager {
       url: config.url.trim(),
       apiKey: config.apiKey.trim(),
       model: config.model.trim(),
-      prompt: config.prompt || '根据以下视频字幕，用中文总结视频内容：\n\n',
+      prompt1: config.prompt1 || '',
+      prompt2: config.prompt2 || '',
       isOpenRouter: config.isOpenRouter || false
     };
 
@@ -108,19 +129,27 @@ class ConfigManager {
       return { success: false, error: '配置不存在' };
     }
 
-    // 验证更新的字段
-    if (updates.url) {
+    // 验证API Key
+    if (updates.apiKey !== undefined) {
+      const keyValidation = validateApiKey(updates.apiKey, configs[index].isOpenRouter);
+      if (!keyValidation.valid) {
+        return { success: false, error: keyValidation.error };
+      }
+    }
+
+    // 验证API URL
+    if (updates.url !== undefined) {
       const urlValidation = validateApiUrl(updates.url);
       if (!urlValidation.valid) {
         return { success: false, error: urlValidation.error };
       }
     }
 
-    if (updates.apiKey) {
-      const keyValidation = validateApiKey(updates.apiKey);
-      if (!keyValidation.valid) {
-        return { success: false, error: keyValidation.error };
-      }
+    // 处理prompt迁移
+    if (updates.prompt && (!updates.prompt1 || !updates.prompt2)) {
+      updates.prompt1 = updates.prompt;
+      updates.prompt2 = this._getDefaultPrompt2(); // 使用JSON格式的默认提示词
+      delete updates.prompt;
     }
 
     configs[index] = { ...configs[index], ...updates };
@@ -226,6 +255,58 @@ class ConfigManager {
    */
   setNotionAutoSendEnabled(enabled) {
     GM_setValue(STORAGE_KEYS.NOTION_AUTO_SEND, enabled);
+  }
+
+  /**
+   * 修复已存在的配置，确保prompt2使用正确的JSON格式
+   * @returns {boolean} 是否进行了修复
+   */
+  fixExistingConfigPrompts() {
+    const configs = this.getAIConfigs();
+    let hasFixed = false;
+    
+    const fixedConfigs = configs.map(config => {
+      // 如果prompt1和prompt2相同，或者prompt2包含TL;DR（说明用了markdown格式），则修复
+      if (config.prompt1 && config.prompt2 && 
+          (config.prompt1 === config.prompt2 || config.prompt2.includes('TL;DR'))) {
+        hasFixed = true;
+        return {
+          ...config,
+          prompt2: this._getDefaultPrompt2()
+        };
+      }
+      return config;
+    });
+    
+    if (hasFixed) {
+      this.saveAIConfigs(fixedConfigs);
+      logger.debug('ConfigManager', '已修复配置中的prompt2为JSON格式');
+    }
+    
+    return hasFixed;
+  }
+
+  /**
+   * 获取JSON格式的默认提示词
+   * @private
+   * @returns {string}
+   */
+  _getDefaultPrompt2() {
+    return `分析以下带时间戳的字幕，提取5-8个关键段落。
+
+重要：你的回复必须只包含JSON，不要有任何其他文字、解释或markdown标记。
+直接以{开始，以}结束。
+
+JSON格式要求：
+{"segments":[
+  {"timestamp":"分钟:秒","title":"标题(10字内)","summary":"内容总结(30-50字)"}
+]}
+
+示例（你的回复应该像这样）：
+{"segments":[{"timestamp":"00:15","title":"开场介绍","summary":"主持人介绍今天的主题和嘉宾背景"},{"timestamp":"02:30","title":"核心观点","summary":"讨论技术发展趋势和未来展望"}]}
+
+字幕内容：
+`;
   }
 }
 

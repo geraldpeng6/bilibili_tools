@@ -1,13 +1,17 @@
 {
   "name": "bilibili-tools",
-  "version": "1.0.0",
+  "version": "1.0.8",
   "description": "Bilibili Tools - 六合一工具集（字幕提取、AI总结、Notion集成、笔记保存、播放速度控制、SponsorBlock广告跳过）",
   "type": "module",
   "scripts": {
     "dev": "vite build --watch --mode development",
     "build": "vite build",
     "preview": "vite preview",
-    "prepare": "husky"
+    "prepare": "husky",
+    "version:patch": "node scripts/bump-version.js patch && npm run build",
+    "version:minor": "node scripts/bump-version.js minor && npm run build",
+    "version:major": "node scripts/bump-version.js major && npm run build",
+    "bump": "node scripts/bump-version.js patch && npm run build"
   },
   "devDependencies": {
     "husky": "^9.1.7",

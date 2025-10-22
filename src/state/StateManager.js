@@ -45,6 +45,7 @@ class StateManager {
     this.notion = {
       isSending: false,              // 是否正在发送
       sendPromise: null,             // 发送Promise
+      pageIds: {},                   // 视频对应的Notion页面ID {bvid: pageId}
     };
 
     // UI相关状态
@@ -212,7 +213,7 @@ class StateManager {
 
   /**
    * 完成AI总结
-   * @param {string} summary - 总结内容
+   * @param {Object|string} summary - 总结内容（新格式为对象，包含markdown和segments）
    */
   finishAISummary(summary) {
     this.ai.isSummarizing = false;
@@ -223,7 +224,9 @@ class StateManager {
     // 保存到sessionStorage
     const videoKey = this.getVideoKey();
     if (videoKey && summary) {
-      sessionStorage.setItem(`ai-summary-${videoKey}`, summary);
+      // 如果是对象，则序列化为JSON字符串
+      const summaryToStore = typeof summary === 'object' ? JSON.stringify(summary) : summary;
+      sessionStorage.setItem(`ai-summary-${videoKey}`, summaryToStore);
     }
     
     eventBus.emit(EVENTS.AI_SUMMARY_COMPLETE, summary, videoKey);
@@ -244,7 +247,7 @@ class StateManager {
   /**
    * 获取AI总结（优先从缓存）
    * @param {string|null} videoKey - 视频键
-   * @returns {string|null}
+   * @returns {Object|string|null}
    */
   getAISummary(videoKey = null) {
     const key = videoKey || this.getVideoKey();
@@ -253,15 +256,15 @@ class StateManager {
       return this.ai.currentSummary;
     }
     
-    // 从sessionStorage获取
+    // 仞sessionStorage获取
     const cached = sessionStorage.getItem(`ai-summary-${key}`);
     if (cached) {
-      return cached;
-    }
-    
-    // 如果是当前视频，返回当前总结
-    if (key === this.getVideoKey()) {
-      return this.ai.currentSummary;
+      // 尝试解析JSON，如果失败则返回原始字符串
+      try {
+        return JSON.parse(cached);
+      } catch (e) {
+        return cached;
+      }
     }
     
     return null;
@@ -292,6 +295,26 @@ class StateManager {
   togglePanel() {
     this.ui.panelVisible = !this.ui.panelVisible;
     eventBus.emit(EVENTS.UI_PANEL_TOGGLE, this.ui.panelVisible);
+  }
+
+  /**
+   * 设置Notion页面ID
+   * @param {string} bvid - 视频BV号
+   * @param {string} pageId - Notion页面ID
+   */
+  setNotionPageId(bvid, pageId) {
+    if (bvid && pageId) {
+      this.notion.pageIds[bvid] = pageId;
+    }
+  }
+
+  /**
+   * 获取Notion页面ID
+   * @param {string} bvid - 视频BV号
+   * @returns {string|null} Notion页面ID
+   */
+  getNotionPageId(bvid) {
+    return this.notion.pageIds[bvid] || null;
   }
 
   /**

@@ -3,6 +3,8 @@
  * 统一管理所有模态框的显示、隐藏和ESC键处理
  */
 
+import logger from './DebugLogger.js';
+
 class ModalManager {
   constructor() {
     this.stack = []; // 模态框堆栈
@@ -34,7 +36,7 @@ class ModalManager {
    */
   push(modal) {
     if (!modal || typeof modal.hide !== 'function') {
-      console.warn('[ModalManager] 模态框实例必须有hide方法');
+      logger.warn('ModalManager', '模态框实例必须有hide方法');
       return;
     }
 

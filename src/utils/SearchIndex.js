@@ -3,6 +3,8 @@
  * 为字幕内容建立倒排索引，提升搜索性能
  */
 
+import logger from './DebugLogger.js';
+
 class SearchIndex {
   constructor() {
     this.index = new Map(); // 词 -> [项索引列表]
@@ -33,7 +35,7 @@ class SearchIndex {
       });
     });
 
-    console.log(`[SearchIndex] 索引构建完成: ${this.index.size} 个词, ${items.length} 项数据`);
+    logger.debug('SearchIndex', `索引构建完成: ${this.index.size} 个词, ${items.length} 项数据`);
   }
 
   /**

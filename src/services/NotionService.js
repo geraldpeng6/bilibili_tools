@@ -57,7 +57,12 @@ class NotionService {
       const properties = this._buildProperties(schema, videoInfo, videoTitle, videoUrl, creator, subtitleData);
 
       // 创建页面
-      await this._createPage(notionConfig.apiKey, databaseId, properties, pageChildren);
+      const pageId = await this._createPage(notionConfig.apiKey, databaseId, properties, pageChildren);
+      
+      // 存储页面ID到状态，供截图功能使用
+      if (pageId) {
+        state.setNotionPageId(videoInfo.bvid, pageId);
+      }
 
       // 保存database ID（如果是首次使用）
       if (!notionConfig.databaseId) {
@@ -72,6 +77,63 @@ class NotionService {
       eventBus.emit(EVENTS.NOTION_SEND_FAILED, error.message);
       throw error;
     }
+  }
+
+  /**
+   * 查询数据库中的视频页面
+   * @param {string} apiKey - API Key  
+   * @param {string} databaseId - 数据库ID
+   * @param {string} bvid - 视频BV号
+   * @returns {Promise<string|null>} - 返回页面ID或null
+   */
+  async queryVideoPage(apiKey, databaseId, bvid) {
+    if (!apiKey || !databaseId || !bvid) {
+      return null;
+    }
+
+    const queryData = {
+      filter: {
+        property: 'BV号',
+        rich_text: {
+          contains: bvid
+        }
+      },
+      sorts: [
+        {
+          timestamp: 'created_time',
+          direction: 'descending'
+        }
+      ],
+      page_size: 1
+    };
+
+    return new Promise((resolve) => {
+      GM_xmlhttpRequest({
+        method: 'POST',
+        url: `${API.NOTION_BASE_URL}/databases/${databaseId}/query`,
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'Notion-Version': API.NOTION_VERSION
+        },
+        data: JSON.stringify(queryData),
+        onload: (response) => {
+          if (response.status === 200) {
+            const data = JSON.parse(response.responseText);
+            if (data.results && data.results.length > 0) {
+              resolve(data.results[0].id);
+            } else {
+              resolve(null);
+            }
+          } else {
+            resolve(null);
+          }
+        },
+        onerror: () => {
+          resolve(null);
+        }
+      });
+    });
   }
 
   /**
@@ -194,7 +256,7 @@ class NotionService {
         onload: (response) => {
           if (response.status === 200) {
             const data = JSON.parse(response.responseText);
-            resolve(data);
+            resolve(data.id); // 返回页面ID
           } else {
             const error = this._parseNotionError(response);
             reject(error);
@@ -205,6 +267,142 @@ class NotionService {
         }
       });
     });
+  }
+
+  /**
+   * 追加内容到现有Notion页面
+   * @param {string} apiKey - API Key
+   * @param {string} pageId - 页面ID
+   * @param {Array} blocks - 要追加的blocks
+   * @returns {Promise<void>}
+   */
+  async appendToPage(apiKey, pageId, blocks) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'PATCH',
+        url: `${API.NOTION_BASE_URL}/blocks/${pageId}/children`,
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'Notion-Version': API.NOTION_VERSION
+        },
+        data: JSON.stringify({ children: blocks }),
+        onload: (response) => {
+          if (response.status === 200) {
+            resolve();
+          } else {
+            const error = this._parseNotionError(response);
+            reject(error);
+          }
+        },
+        onerror: () => {
+          reject(new Error('追加内容失败'));
+        }
+      });
+    });
+  }
+
+  /**
+   * 发送AI总结到Notion
+   * @param {Object} summary - AI总结数据 {markdown, segments}
+   * @returns {Promise<void>}
+   */
+  async sendAISummary(summary) {
+    const notionConfig = config.getNotionConfig();
+    const videoInfo = state.getVideoInfo();
+    const bvid = videoInfo?.bvid;
+
+    if (!bvid) {
+      throw new Error('无效的视频信息');
+    }
+
+    // 获取页面ID（从缓存或查询）
+    let pageId = state.getNotionPageId(bvid);
+    
+    if (!pageId && notionConfig.databaseId) {
+      pageId = await this.queryVideoPage(notionConfig.apiKey, notionConfig.databaseId, bvid);
+      if (pageId) {
+        state.setNotionPageId(bvid, pageId);
+      }
+    }
+
+    if (!pageId) {
+      throw new Error('请先发送字幕到Notion以创建视频页面');
+    }
+
+    // 构建AI总结blocks
+    const blocks = this._buildAISummaryBlocks(summary);
+    
+    // 追加到页面
+    await this.appendToPage(notionConfig.apiKey, pageId, blocks);
+  }
+
+  /**
+   * 构建AI总结blocks
+   * @private
+   * @param {Object} summary - AI总结数据
+   * @returns {Array} blocks数组
+   */
+  _buildAISummaryBlocks(summary) {
+    const blocks = [];
+
+    // 添加分隔线
+    blocks.push({
+      object: 'block',
+      type: 'divider',
+      divider: {}
+    });
+
+    // 添加AI总结标题
+    blocks.push({
+      object: 'block',
+      type: 'heading_2',
+      heading_2: {
+        rich_text: [{ type: 'text', text: { content: '🤖 AI总结' } }]
+      }
+    });
+
+    // 添加Markdown总结
+    if (summary.markdown) {
+      // 将markdown内容转换为Notion blocks
+      const markdownLines = summary.markdown.split('\n');
+      markdownLines.forEach(line => {
+        if (line.trim()) {
+          blocks.push({
+            object: 'block',
+            type: 'paragraph',
+            paragraph: {
+              rich_text: [{ type: 'text', text: { content: line } }]
+            }
+          });
+        }
+      });
+    }
+
+    // 添加时间戳段落
+    if (summary.segments && summary.segments.length > 0) {
+      blocks.push({
+        object: 'block',
+        type: 'heading_3',
+        heading_3: {
+          rich_text: [{ type: 'text', text: { content: '⏱️ 时间戳段落' } }]
+        }
+      });
+
+      summary.segments.forEach(segment => {
+        blocks.push({
+          object: 'block',
+          type: 'bulleted_list_item',
+          bulleted_list_item: {
+            rich_text: [
+              { type: 'text', text: { content: `${segment.timestamp} - ${segment.title}: ${segment.summary || ''}` } }
+            ]
+          }
+        });
+      });
+    }
+
+    return blocks;
   }
 
   /**
@@ -396,9 +594,19 @@ class NotionService {
         const summary = videoKey ? state.getAISummary(videoKey) : null;
         
         if (fieldType === 'rich_text' && summary) {
-          properties[fieldName] = {
-            rich_text: [{ text: { content: summary.substring(0, LIMITS.NOTION_TEXT_MAX) } }]
-          };
+          // summary可能是对象或字符串，需要处理两种情况
+          let summaryText = '';
+          if (typeof summary === 'string') {
+            summaryText = summary;
+          } else if (summary && summary.markdown) {
+            summaryText = summary.markdown;
+          }
+          
+          if (summaryText) {
+            properties[fieldName] = {
+              rich_text: [{ text: { content: summaryText.substring(0, LIMITS.NOTION_TEXT_MAX) } }]
+            };
+          }
         }
       }
     });

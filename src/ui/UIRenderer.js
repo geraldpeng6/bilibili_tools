@@ -5,73 +5,100 @@
 
 import { ICONS } from './styles.js';
 import state from '../state/StateManager.js';
-import performanceMonitor from '../utils/PerformanceMonitor.js';
 import { formatTime } from '../utils/helpers.js';
 import config from '../config/ConfigManager.js';
+import shortcutManager from '../config/ShortcutManager.js';
+import logger from '../utils/DebugLogger.js';
 import { AI_API_KEY_URLS } from '../constants.js';
 
 class UIRenderer {
+  constructor() {
+    this.markedConfigured = false;
+  }
+
   /**
-   * 渲染字幕面板（集成性能监控）
+   * 渲染字幕面板
    * @param {Array} subtitleData - 字幕数据
    * @returns {string} - HTML字符串
    */
   renderSubtitlePanel(subtitleData) {
-    return performanceMonitor.measure('渲染字幕面板', () => {
-      const videoKey = state.getVideoKey();
-      const cachedSummary = videoKey ? state.getAISummary(videoKey) : null;
+    const videoKey = state.getVideoKey();
+    const cachedSummary = videoKey ? state.getAISummary(videoKey) : null;
 
     let html = `
       <div class="subtitle-header">
-        <div class="subtitle-search-container">
-          <input type="text" class="search-input" placeholder="搜索..." id="subtitle-search-input">
-          <div class="search-nav" id="search-nav" style="display: none;">
-            <span class="search-counter" id="search-counter">0/0</span>
-            <button class="search-nav-btn search-prev" id="search-prev" title="上一个">↑</button>
-            <button class="search-nav-btn search-next" id="search-next" title="下一个">↓</button>
+        <div class="subtitle-header-left">
+          <span class="subtitle-status-icon" title="AI助手">${ICONS.AI_ASSISTANT}</span>
+        </div>
+        <div class="subtitle-header-right">
+          <div class="subtitle-search-container">
+            <input type="text" class="search-input" placeholder="搜索..." id="subtitle-search-input">
+            <div class="search-controls" id="search-controls" style="display: none;">
+              <span class="search-counter" id="search-counter">0/0</span>
+              <button class="search-nav-btn search-prev" id="search-prev" title="上一个">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M9 7.5L6 4.5L3 7.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+              <button class="search-nav-btn search-next" id="search-next" title="下一个">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M3 4.5L6 7.5L9 4.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="subtitle-header-actions">
+            <span class="ai-icon" title="AI配置">
+              ${ICONS.AI}
+            </span>
+            <span class="download-icon" title="下载字幕">
+              ${ICONS.DOWNLOAD}
+            </span>
+            <span class="notion-icon ${state.notion.isSending ? 'loading' : ''}" title="Notion">
+              ${ICONS.NOTION}
+            </span>
+            <span class="subtitle-close">×</span>
           </div>
         </div>
-        <div class="subtitle-header-actions">
-          <span class="ai-icon ${state.ai.isSummarizing ? 'loading' : ''}" title="AI 总结">
-            ${ICONS.AI}
-          </span>
-          <span class="download-icon" title="下载字幕">
-            ${ICONS.DOWNLOAD}
-          </span>
-          <span class="notion-icon ${state.notion.isSending ? 'loading' : ''}" title="发送到 Notion">
-            ${ICONS.NOTION}
-          </span>
-          <span class="subtitle-close">×</span>
-        </div>
+      </div>
+      <div class="subtitle-tabs">
+        <div class="subtitle-tab active" data-tab="summary">视频总结</div>
+        <div class="subtitle-tab" data-tab="subtitles">字幕列表</div>
       </div>
       <div class="subtitle-content">
-        <button class="subtitle-toggle-btn" id="subtitle-toggle-btn" title="展开/收起字幕列表 (${subtitleData.length}条)">
-          <span class="subtitle-toggle-icon">►</span>
-        </button>
-        <div class="subtitle-list-container" id="subtitle-list-container">
+        <div class="subtitle-panel" id="summary-panel" style="display: block;">
+          ${this.renderAISummaryPanel(cachedSummary)}
+        </div>
+        <div class="subtitle-panel" id="subtitles-panel" style="display: none;">
+          <div class="subtitle-list-container" id="subtitle-list-container">
+            <div class="original-subtitles-section">
+              <div class="segments-header">字幕列表</div>
     `;
-
-    // 渲染字幕列表
+            
+    // 渲染原始字幕列表
     subtitleData.forEach((item, index) => {
       const startTime = formatTime(item.from);
       html += `
         <div class="subtitle-item" data-index="${index}" data-from="${item.from}" data-to="${item.to}">
-          <div class="subtitle-item-header">
-            <div class="subtitle-time">${startTime}</div>
-            <button class="save-subtitle-note-btn" data-content="${this.escapeHtml(item.content)}" title="保存为笔记">保存</button>
-          </div>
-          <div class="subtitle-text">${item.content}</div>
+          <span class="subtitle-time">${startTime}</span>
+          <span class="subtitle-text">${item.content}</span>
+          <button class="save-subtitle-note-btn" data-content="${this.escapeHtml(item.content)}" title="保存为笔记">保存</button>
         </div>
       `;
     });
 
-      html += `
+    html += `
+              </div>
+            </div>
+            <button class="subtitle-follow-btn" id="subtitle-follow-btn" style="display: none;" title="回到当前播放位置">
+              恢复滚动
+            </button>
+          </div>
         </div>
       </div>
     `;
 
       return html;
-    });
   }
 
   /**
@@ -86,7 +113,321 @@ class UIRenderer {
   }
 
   /**
-   * 渲染AI总结区域
+   * 解析markdown文本
+   * @param {string} markdownText - markdown文本
+   * @returns {string} 解析后的HTML
+   */
+  /**
+   * 转义HTML特殊字符
+   * @private
+   * @param {string} text - 需要转义的文本
+   * @returns {string} 转义后的文本
+   */
+  _escapeHtml(text) {
+    const escapeMap = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    };
+    return text.replace(/[&<>"']/g, char => escapeMap[char]);
+  }
+
+  parseMarkdown(markdownText) {
+    if (!markdownText) return '';
+    
+    // 先清理markdown文本，移除空的代码块
+    let cleanedText = markdownText.trim();
+    // 移除空的代码块（可能包含只有空格/换行的内容）
+    cleanedText = cleanedText.replace(/```[a-zA-Z0-9]*\s*```/g, '');
+    cleanedText = cleanedText.replace(/```\s*\n\s*```/g, '');
+    
+    // 检查marked库是否可用
+    if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
+      try {
+        // 配置marked以支持链接在新标签页打开
+        if (typeof marked.use === 'function') {
+          marked.use({
+            renderer: {
+              link(href, title, text) {
+                return `<a href="${href}" target="_blank" rel="noopener noreferrer" ${title ? `title="${title}"` : ''}>${text}</a>`;
+              }
+            }
+          });
+        }
+        if (!this.markedConfigured && typeof marked.setOptions === 'function') {
+          marked.setOptions({ breaks: true, gfm: true });
+          this.markedConfigured = true;
+        }
+        let html = marked.parse(cleanedText);
+        // 清理生成的空代码块
+        html = html.replace(/<pre><code[^>]*>\s*<\/code><\/pre>/g, '');
+        return html;
+      } catch (error) {
+        logger.warn('UIRenderer', 'Marked解析失败:', error);
+      }
+    }
+
+    let html = cleanedText;
+
+    // 处理代码块 (```code```)
+    html = html.replace(/```([a-zA-Z0-9]*)?\n([\s\S]*?)```/g, (match, lang, code) => {
+      if (!code.trim()) return ''; // 忽略空代码块
+      const langAttr = lang ? ` class="language-${lang}"` : '';
+      return `<pre><code${langAttr}>${this._escapeHtml(code)}</code></pre>`;
+    });
+
+    // 处理标题 (#)
+    html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+    html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+    html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+
+    // 处理粗体 (**text**)
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+    // 处理斜体 (*text*)
+    html = html.replace(/(?<!\*)\*(?!\*)([^*]+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+
+    // 处理行内代码 (`code`)
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    // 处理列表项
+    html = html.replace(/^\* (.*$)/gim, '<li>$1</li>');
+    html = html.replace(/^- (.*$)/gim, '<li>$1</li>');
+    html = html.replace(/^\d+\. (.*$)/gim, '<li>$1</li>');
+
+    // 将连续的<li>标签包装在<ul>中
+    html = html.replace(/(<li>.*<\/li>(?:\s*<li>.*<\/li>)*)/g, '<ul>$1</ul>');
+
+    // 将连续的<ul>替换为<ol>当原始文本使用有序列表时
+    html = html.replace(/<ul>((?:<li>.*<\/li>\s*)+)<\/ul>/g, (match, listItems) => {
+      const originalLines = cleanedText.split('\n');
+      const hasOrdered = originalLines.some(line => /^\d+\.\s+/.test(line));
+      return hasOrdered ? `<ol>${listItems}</ol>` : match;
+    });
+
+    // 处理换行
+    html = html.replace(/\n/g, '<br>');
+
+    return html;
+  }
+
+  normalizeMarkdown(markdownText) {
+    if (!markdownText) {
+      return '';
+    }
+
+    let text = String(markdownText).replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+
+    const fenceMatch = text.match(/^```[a-zA-Z0-9+_-]*\s*\n([\s\S]*?)\s*```$/);
+    if (fenceMatch) {
+      text = fenceMatch[1];
+    }
+
+    const lines = text.split('\n');
+    const nonEmpty = lines.filter(line => line.trim().length > 0);
+
+    if (nonEmpty.length > 0) {
+      const minIndent = Math.min(...nonEmpty.map(line => line.match(/^ */)[0].length));
+      if (minIndent > 0) {
+        text = lines
+          .map(line => (line.startsWith(' '.repeat(minIndent)) ? line.slice(minIndent) : line))
+          .join('\n');
+      }
+    }
+
+    return text.trim();
+  }
+
+  /**
+   * 渲染AI总结面板
+   * @param {Object|string} summary - 总结内容（新格式为对象，包含markdown和segments）
+   * @param {boolean} isLoading - 是否正在加载（已废弃，不再显示加载状态）
+   * @returns {string} - HTML字符串
+   */
+  renderAISummaryPanel(summary = null, isLoading = false) {
+    let html = '';
+    
+    // 不再显示加载状态，直接判断是否有内容
+    if (summary) {
+      let mainSummary = '';
+      let segments = [];
+      
+      // 处理新格式（对象包含markdown和segments）
+      if (typeof summary === 'object' && summary.markdown) {
+        // 新格式：显示Markdown总结和segments
+        mainSummary = this.parseMarkdown(summary.markdown);
+        segments = summary.segments || [];
+      } else if (typeof summary === 'string') {
+        // 兼容旧格式：解析字符串中的总结部分
+        const parsed = this.parseAISummary(summary);
+        mainSummary = parsed.mainSummary;
+      }
+      
+      html = '<div class="summary-panel-container">';
+      
+      // 先渲染AI时间戳段落（如果存在）
+      if (segments && segments.length > 0) {
+        html += `
+          <div class="ai-segments-in-summary">
+            <div class="segments-header">AI时间戳段落</div>
+            ${this.renderAISegments(segments)}
+            <div class="segments-divider"></div>
+          </div>
+        `;
+      }
+      
+      // 然后渲染总结内容
+      html += mainSummary.trim() ? `
+        <div class="ai-summary-main">
+          <div class="summary-content">${mainSummary}</div>
+        </div>
+      ` : '<div class="ai-summary-empty">暂无总结内容</div>';
+      
+      html += '</div>';
+    } else {
+      html = `
+        <div class="ai-summary-empty">
+          <p>点击上方AI图标生成视频总结</p>
+        </div>
+      `;
+    }
+    
+    return html;
+  }
+
+  /**
+   * 解析AI总结内容，分离主要总结和要点
+   * @param {string} summary - 原始总结内容
+   * @returns {{mainSummary: string, keyPoints: Array}}
+   */
+  parseAISummary(summary) {
+    let mainSummary = '';
+    let keyPoints = [];
+    
+    // 方案1：匹配[总结]和[段落]格式
+    const summaryMatch = summary.match(/\[总结\]([\s\S]*?)(?=\[段落\]|$)/i);
+    const paragraphMatch = summary.match(/\[段落\]([\s\S]*)/i);
+    
+    if (summaryMatch && summaryMatch[1]) {
+      const summaryText = summaryMatch[1].trim();
+      mainSummary = this.parseMarkdown(summaryText);
+    }
+    
+    if (paragraphMatch && paragraphMatch[1]) {
+      const paragraphText = paragraphMatch[1];
+      // 匹配每个段落：[00:02:15] 标题\n    内容 或 [00:02:15] 标题内容
+      const paragraphRegex = /\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*([^\n]+?)(?:\n\s+([^\[]+?))?(?=\[|$)/g;
+      let match;
+      
+      while ((match = paragraphRegex.exec(paragraphText)) !== null) {
+        const [_, timeStr, titleOrContent, additionalContent] = match;
+        
+        // 标准化时间戳格式
+        let normalizedTime = timeStr;
+        const timeParts = timeStr.split(':');
+        if (timeParts.length === 2) {
+          normalizedTime = `[${timeParts[0].padStart(2, '0')}:${timeParts[1].padStart(2, '0')}]`;
+        } else if (timeParts.length === 3) {
+          const hours = parseInt(timeParts[0]);
+          const minutes = parseInt(timeParts[1]);
+          const totalMinutes = hours * 60 + minutes;
+          normalizedTime = `[${totalMinutes.toString().padStart(2, '0')}:${timeParts[2].padStart(2, '0')}]`;
+        }
+        
+        // 如果有缩进内容，则第一行是标题，缩进内容是描述
+        // 否则整个内容都作为标题
+        const title = titleOrContent.trim();
+        const content = additionalContent ? additionalContent.trim() : '';
+        
+        keyPoints.push({
+          title: title,
+          time: normalizedTime,
+          content: content
+        });
+      }
+    }
+    
+    // 方案2：智能解析（如果方案1没有找到内容）
+    if (!mainSummary && keyPoints.length === 0) {
+      const lines = summary.split('\n');
+      let summaryPart = [];
+      let inParagraphSection = false;
+      
+      for (const line of lines) {
+        const trimmed = line.trim();
+        
+        // 检测是否是时间戳行
+        if (trimmed.match(/^\[\d{1,2}:\d{2}(?::\d{2})?\]/)) {
+          inParagraphSection = true;
+          // 解析时间戳行
+          const timeMatch = trimmed.match(/^\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*(.*)/);
+          if (timeMatch) {
+            const [_, timeStr, content] = timeMatch;
+            let normalizedTime = timeStr;
+            const timeParts = timeStr.split(':');
+            if (timeParts.length === 2) {
+              normalizedTime = `[${timeParts[0].padStart(2, '0')}:${timeParts[1].padStart(2, '0')}]`;
+            } else if (timeParts.length === 3) {
+              const hours = parseInt(timeParts[0]);
+              const minutes = parseInt(timeParts[1]);
+              const totalMinutes = hours * 60 + minutes;
+              normalizedTime = `[${totalMinutes.toString().padStart(2, '0')}:${timeParts[2].padStart(2, '0')}]`;
+            }
+            
+            keyPoints.push({
+              title: content.trim(),
+              time: normalizedTime,
+              content: ''
+            });
+          }
+        } else if (!inParagraphSection) {
+          // 在时间戳出现之前的内容都是总结
+          summaryPart.push(line);
+        } else if (keyPoints.length > 0 && line.startsWith('  ')) {
+          // 缩进的内容属于上一个要点的描述
+          keyPoints[keyPoints.length - 1].content += (keyPoints[keyPoints.length - 1].content ? ' ' : '') + trimmed;
+        }
+      }
+      
+      if (summaryPart.length > 0) {
+        mainSummary = this.parseMarkdown(summaryPart.join('\n').trim());
+      }
+    }
+    
+    // 方案3：兼容旧格式
+    if (!mainSummary && keyPoints.length === 0) {
+      const parts = summary.split(/##\s*要点/i);
+      
+      if (parts.length >= 2) {
+        const summaryPart = parts[0].replace(/##\s*总结/i, '').trim();
+        mainSummary = this.parseMarkdown(summaryPart);
+        
+        const pointsPart = parts[1];
+        const pointMatches = pointsPart.matchAll(/###\s*\[?([^\]\n]+)\]?[\s\S]*?-\s*时间[：:]\s*\[(\d{1,2}):(\d{2})\][\s\S]*?-\s*内容[：:]\s*([^\n]+)/gi);
+        
+        for (const match of pointMatches) {
+          const [_, title, minutes, seconds, content] = match;
+          keyPoints.push({
+            title: title.trim(),
+            time: `[${minutes.padStart(2, '0')}:${seconds.padStart(2, '0')}]`,
+            content: content.trim()
+          });
+        }
+      }
+    }
+    
+    // 最终降级：如果什么都没解析到，把全部内容作为总结
+    if (!mainSummary && keyPoints.length === 0) {
+      mainSummary = this.parseMarkdown(summary);
+    }
+    
+    return { mainSummary, keyPoints };
+  }
+
+  /**
+   * 渲染AI总结区域（兼容旧方法）
    * @param {string} summary - 总结内容（Markdown格式）
    * @param {boolean} isLoading - 是否正在加载
    * @returns {HTMLElement} - DOM元素
@@ -94,56 +435,70 @@ class UIRenderer {
   renderAISummarySection(summary = null, isLoading = false) {
     const section = document.createElement('div');
     section.className = 'ai-summary-section';
-
-    if (isLoading) {
-      section.innerHTML = `
-        <div class="ai-summary-title">
-          <span>✨ AI 视频总结</span>
-        </div>
-        <div class="ai-summary-content ai-summary-loading">正在生成总结...</div>
-      `;
-    } else if (summary) {
-      // 确保marked库已加载
-      const parsedHTML = (typeof marked !== 'undefined' && marked.parse) 
-        ? marked.parse(summary) 
-        : summary.replace(/\n/g, '<br>');
-      
-      section.innerHTML = `
-        <div class="ai-summary-title">
-          <span>✨ AI 视频总结</span>
-        </div>
-        <div class="ai-summary-content">${parsedHTML}</div>
-      `;
-    }
-
+    section.innerHTML = this.renderAISummaryPanel(summary, isLoading);
     return section;
   }
 
   /**
    * 更新AI总结内容
-   * @param {HTMLElement} container - 字幕容器元素
-   * @param {string} summary - 总结内容
+   * @param {HTMLElement} container - 容器元素
+   * @param {Object|string} summary - 总结内容
    */
   updateAISummary(container, summary) {
-    const contentDiv = container.querySelector('.subtitle-content');
-    if (!contentDiv) return;
-
-    let summarySection = contentDiv.querySelector('.ai-summary-section');
-
-    if (!summarySection) {
-      summarySection = this.renderAISummarySection(summary);
-      contentDiv.insertBefore(summarySection, contentDiv.firstChild);
-    } else {
-      const summaryContent = summarySection.querySelector('.ai-summary-content');
-      if (summaryContent) {
-        summaryContent.classList.remove('ai-summary-loading');
-        // 确保marked库已加载
-        const parsedHTML = (typeof marked !== 'undefined' && marked.parse) 
-          ? marked.parse(summary) 
-          : summary.replace(/\n/g, '<br>');
-        summaryContent.innerHTML = parsedHTML;
-      }
+    if (!container) {
+      container = document.getElementById('subtitle-container');
     }
+    if (!container) return;
+    
+    // 更新视频总结面板（现在包含段落总结）
+    const summaryPanel = container.querySelector('#summary-panel');
+    if (summaryPanel) {
+      summaryPanel.innerHTML = this.renderAISummaryPanel(summary, false);
+      // 时间戳点击事件已由EventHandlers全局处理
+    }
+  }
+
+  /**
+   * 渲染AI段落
+   * @param {Array} segments - AI段落数组
+   * @returns {string} HTML字符串
+   */
+  renderAISegments(segments) {
+    return segments.map((segment, idx) => {
+      const displayTime = (segment.timestamp || '[00:00]').replace(/[\[\]]/g, '');
+      const timeAttr = segment.timestamp || '[00:00]';
+      
+      return `
+        <div class="section-item" data-time="${timeAttr}" data-index="${idx}">
+          <button class="time-btn">${displayTime}</button>
+          <div class="item-content">
+            ${segment.summary ? 
+              `<span class="item-title">${segment.title || ''}</span>
+               <span class="item-desc">${segment.summary}</span>` :
+              `<span class="item-single">${segment.title || ''}</span>`
+            }
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  /**
+   * 创建临时通知
+   * @param {string} message - 通知消息
+   * @returns {HTMLElement}
+   */
+  createNotification(message) {
+    const notif = document.createElement('div');
+    notif.className = 'notion-toast show';
+    notif.textContent = message;
+    document.body.appendChild(notif);
+    
+    setTimeout(() => {
+      notif.remove();
+    }, 3000);
+    
+    return notif;
   }
 
   /**
@@ -228,7 +583,8 @@ class UIRenderer {
             </div>
           </div>
           <div class="ai-config-list" id="ai-config-list"></div>
-          <div style="margin-bottom: 15px; text-align: center;">
+          <div style="margin-bottom: 15px; text-align: center; display: flex; gap: 10px; justify-content: center;">
+            <button class="config-btn config-btn-primary" id="ai-start-summary-btn" style="padding: 8px 20px; font-size: 14px; font-weight: 600;">🚀 开始总结</button>
             <button class="config-btn config-btn-secondary" id="ai-new-config-btn" style="padding: 8px 16px; font-size: 13px;">新建配置</button>
           </div>
           <div class="ai-config-form hidden">
@@ -262,8 +618,12 @@ class UIRenderer {
             </label>
           </div>
           <div class="config-field">
-            <label>提示词 (Prompt)</label>
-            <textarea id="ai-config-prompt" placeholder="根据以下视频字幕，用中文总结视频内容："></textarea>
+            <label>总结提示词 (Markdown总结)</label>
+            <textarea id="ai-config-prompt1" placeholder="请用中文总结以下视频字幕内容，使用Markdown格式输出..."></textarea>
+          </div>
+          <div class="config-field">
+            <label>段落提示词 (JSON时间段落)</label>
+            <textarea id="ai-config-prompt2" placeholder="请根据以下带时间戳的视频字幕内容，提取关键时间点段落..."></textarea>
           </div>
           <div class="config-field">
             <label>
@@ -327,6 +687,81 @@ class UIRenderer {
       statusEl.className = `config-status ${isError ? 'error' : 'success'}`;
       statusEl.textContent = message;
     }
+  }
+
+
+  /**
+   * 渲染快捷键配置面板
+   * @returns {string} - HTML字符串
+   */
+  renderShortcutConfigModal() {
+    logger.debug('UIRenderer', 'renderShortcutConfigModal 开始');
+    
+    if (!shortcutManager) {
+      console.error('[UIRenderer] shortcutManager 未定义');
+      return null;
+    }
+    
+    let shortcuts;
+    try {
+      shortcuts = shortcutManager.getAllShortcuts();
+      logger.debug('UIRenderer', '获取到快捷键:', shortcuts);
+    } catch (error) {
+      console.error('[UIRenderer] 获取快捷键失败:', error);
+      return null;
+    }
+    
+    if (!shortcuts || typeof shortcuts !== 'object') {
+      console.error('[UIRenderer] 快捷键配置无效:', shortcuts);
+      return null;
+    }
+    
+    // 使用与其他配置模态框一致的结构
+    return `
+      <div class="config-modal" id="shortcut-config-modal">
+        <div class="config-modal-content">
+          <div class="config-modal-header">
+            <span class="config-modal-title">快捷键设置</span>
+            <button class="config-modal-close">×</button>
+          </div>
+          <div class="config-modal-body">
+            <div style="margin-bottom: 20px; padding: 15px; background: rgba(254, 235, 234, 0.1); border-radius: 10px; border-left: 4px solid #feebea;">
+              <div style="font-size: 13px; color: #fff; font-weight: 600; margin-bottom: 4px;">使用说明</div>
+              <div style="font-size: 12px; color: rgba(255, 255, 255, 0.7); line-height: 1.5;">
+                点击输入框后按下想要的组合键即可设置。特殊组合键：<br/>
+                • 截图：连按两下 / 键<br/>
+                • 双击操作：快速连续按两次同一个键
+              </div>
+            </div>
+            
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+              ${Object.entries(shortcuts).map(([key, shortcut]) => `
+                <div class="shortcut-item" data-key="${key}">
+                  <div class="shortcut-description">${shortcut.description}</div>
+                  <div class="shortcut-controls">
+                    <input 
+                      type="text" 
+                      class="shortcut-input" 
+                      value="${shortcutManager.formatShortcut(shortcut)}" 
+                      readonly 
+                      placeholder="点击设置"
+                      data-key="${key}"
+                    >
+                    <button class="shortcut-reset-btn" data-key="${key}">重置</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+            
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255, 255, 255, 0.1);">
+              <button class="config-btn config-btn-secondary" id="reset-all-shortcuts">
+                重置所有快捷键
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
   }
 }
 
