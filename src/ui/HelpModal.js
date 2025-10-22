@@ -67,7 +67,7 @@ class HelpModal {
               <li><strong>AI智能总结</strong> - 支持OpenAI、OpenRouter等多种AI服务</li>
               <li><strong>Notion集成</strong> - 一键发送字幕和总结到Notion数据库</li>
               <li><strong>笔记保存</strong> - 选中任意文字显示粉色钢笔图标保存笔记</li>
-              <li><strong>播放速度控制</strong> - 键盘快捷键控制速度和响度检测自动加速</li>
+              <li><strong>播放速度控制</strong> - 键盘快捷键控制速度</li>
             </ul>
           </div>
 
@@ -86,6 +86,11 @@ class HelpModal {
                   <td style="padding: 8px; color: #e5e7eb;">切换字幕面板</td>
                   <td style="padding: 8px;"><code style="background: rgba(255, 255, 255, 0.1); padding: 2px 6px; border-radius: 3px; color: #feebea;">Cmd/Ctrl + B</code></td>
                   <td style="padding: 8px; color: rgba(255, 255, 255, 0.7);">显示/隐藏字幕面板</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(254, 235, 234, 0.1);">
+                  <td style="padding: 8px; color: #e5e7eb;">视频截图</td>
+                  <td style="padding: 8px;"><code style="background: rgba(255, 255, 255, 0.1); padding: 2px 6px; border-radius: 3px; color: #feebea;">Cmd/Ctrl + S</code></td>
+                  <td style="padding: 8px; color: rgba(255, 255, 255, 0.7);">截图并保存到笔记</td>
                 </tr>
                 <tr style="border-bottom: 1px solid rgba(254, 235, 234, 0.1);">
                   <td style="padding: 8px; color: #e5e7eb;">增加速度</td>
@@ -112,11 +117,6 @@ class HelpModal {
                   <td style="padding: 8px;"><code style="background: rgba(255, 255, 255, 0.1); padding: 2px 6px; border-radius: 3px; color: #feebea;">右Option键</code></td>
                   <td style="padding: 8px; color: rgba(255, 255, 255, 0.7);">按住时1.5x加速</td>
                 </tr>
-                <tr style="border-bottom: 1px solid rgba(254, 235, 234, 0.1);">
-                  <td style="padding: 8px; color: #e5e7eb;">响度检测</td>
-                  <td style="padding: 8px;"><code style="background: rgba(255, 255, 255, 0.1); padding: 2px 6px; border-radius: 3px; color: #feebea;">, + . (同时按)</code></td>
-                  <td style="padding: 8px; color: rgba(255, 255, 255, 0.7);">开启/关闭自动加速</td>
-                </tr>
               </tbody>
             </table>
           </div>
@@ -127,7 +127,8 @@ class HelpModal {
               <p style="margin: 8px 0;"><strong>字幕提取：</strong>打开B站视频，等待几秒，字幕面板自动出现在右侧</p>
               <p style="margin: 8px 0;"><strong>AI总结：</strong>配置AI服务（菜单 → AI配置），点击魔法棒图标 ✨</p>
               <p style="margin: 8px 0;"><strong>笔记保存：</strong>选中任意文字，点击粉色钢笔图标</p>
-              <p style="margin: 8px 0;"><strong>速度控制：</strong>使用 , 和 . 键调整速度，同时按切换响度检测</p>
+              <p style="margin: 8px 0;"><strong>视频截图：</strong>按 Ctrl/Cmd + S 截取当前帧，自动保存到笔记，B站视频可同步到Notion</p>
+              <p style="margin: 8px 0;"><strong>速度控制：</strong>使用 , 和 . 键调整速度</p>
             </div>
           </div>
 

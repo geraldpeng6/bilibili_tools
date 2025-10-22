@@ -16,6 +16,7 @@ class DebugLogger {
   toggleDebugMode() {
     this.debugMode = !this.debugMode;
     GM_setValue('debug_mode', this.debugMode);
+    // 切换调试模式时的提示始终显示
     console.log(`${this.prefix} 调试模式: ${this.debugMode ? '开启' : '关闭'}`);
     return this.debugMode;
   }
@@ -37,10 +38,12 @@ class DebugLogger {
   }
 
   /**
-   * 信息日志（始终输出重要信息）
+   * 信息日志（仅在调试模式下输出）
    */
   info(module, ...args) {
-    console.log(`[${module}]`, ...args);
+    if (this.debugMode) {
+      console.log(`[${module}]`, ...args);
+    }
   }
 
   /**

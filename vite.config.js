@@ -8,7 +8,7 @@ export default defineConfig({
       userscript: {
         name: 'Bilibili Tools',
         namespace: 'http://tampermonkey.net/',
-        version: '1.0.0',
+        version: '1.0.8',
         description: '字幕提取、AI总结、Notion集成、笔记保存、播放速度控制、SponsorBlock广告跳过 - 六合一工具集',
         author: 'geraldpeng & claude 4.5 sonnet',
         license: 'MIT',

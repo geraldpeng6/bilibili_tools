@@ -10,6 +10,7 @@ import { injectStyles } from './ui/styles.js';
 import state from './state/StateManager.js';
 import eventBus from './utils/EventBus.js';
 import config from './config/ConfigManager.js';
+import shortcutManager from './config/ShortcutManager.js';
 
 // 导入服务
 import subtitleService from './services/SubtitleService.js';
@@ -18,6 +19,7 @@ import notionService from './services/NotionService.js';
 import notesService from './services/NotesService.js';
 import speedControlService from './services/SpeedControlService.js';
 import sponsorBlockService from './services/SponsorBlockService.js';
+import screenshotService from './services/ScreenshotService.js';
 import { createVideoQualityService } from './services/VideoQualityService.js';
 
 // 导入UI模块
@@ -25,18 +27,14 @@ import notification from './ui/Notification.js';
 import uiRenderer from './ui/UIRenderer.js';
 import eventHandlers from './ui/EventHandlers.js';
 import notesPanel from './ui/NotesPanel.js';
-import speedControlModal from './ui/SpeedControlModal.js';
 import helpModal from './ui/HelpModal.js';
 import sponsorBlockModal from './ui/SponsorBlockModal.js';
-
-// 导入配置
-import shortcutManager from './config/ShortcutManager.js';
 
 // 导入工具
 import { getVideoInfo, delay } from './utils/helpers.js';
 import performanceMonitor from './utils/PerformanceMonitor.js';
 import resourceManager from './utils/ResourceManager.js';
-import audioContextPool from './utils/AudioContextPool.js';
+// import audioContextPool from './utils/AudioContextPool.js'; // Not implemented yet
 import logger from './utils/DebugLogger.js';
 
 // 导入常量
@@ -57,16 +55,64 @@ class BilibiliSubtitleExtractor {
   }
 
   /**
+   * 设置全局错误处理器
+   * 隔离其他扩展的错误，防止影响本脚本运行
+   */
+  setupErrorHandler() {
+    // 保存原始的错误处理器
+    const originalErrorHandler = window.onerror;
+    
+    // 设置新的错误处理器
+    window.onerror = (message, source, lineno, colno, error) => {
+      // 检查错误是否来自其他扩展
+      if (source && (source.includes('extension://') || source.includes('content.js'))) {
+        // 忽略来自其他扩展的错误
+        logger.debug('Main', '忽略来自其他扩展的错误:', message);
+        return true; // 阻止错误继续传播
+      }
+      
+      // 对于Extension context invalidated错误，直接忽略
+      if (message && message.includes('Extension context invalidated')) {
+        logger.debug('Main', '忽略扩展上下文失效错误');
+        return true;
+      }
+      
+      // 对于其他错误，调用原始处理器（如果存在）
+      if (originalErrorHandler) {
+        return originalErrorHandler(message, source, lineno, colno, error);
+      }
+      return false;
+    };
+    
+    // 处理未捕获的Promise错误
+    window.addEventListener('unhandledrejection', (event) => {
+      if (event.reason && event.reason.message && 
+          event.reason.message.includes('Extension context invalidated')) {
+        event.preventDefault(); // 阻止错误显示在控制台
+        logger.debug('Main', '忽略Promise中的扩展上下文失效错误');
+      }
+    });
+    
+    logger.info('Main', '全局错误处理器已设置');
+  }
+
+  /**
    * 初始化应用
    */
   async init() {
     if (this.initialized) return;
+
+    // 设置全局错误处理，防止其他扩展的错误影响本脚本
+    this.setupErrorHandler();
 
     // 注入样式
     injectStyles();
 
     // 等待页面加载
     await this.waitForPageReady();
+
+    // 修复已存在的配置中错误的prompt2
+    config.fixExistingConfigPrompts();
 
     // 初始化笔记服务
     notesService.init();
@@ -121,6 +167,35 @@ class BilibiliSubtitleExtractor {
       notesPanel.togglePanel();
     });
 
+    // 视频截图（自动保存到笔记）
+    shortcutManager.register('takeScreenshot', async () => {
+      try {
+        // 检查是否需要发送到Notion
+        const videoInfo = state.getVideoInfo();
+        const bvid = videoInfo?.bvid;
+        const notionConfig = config.getNotionConfig();
+        
+        // 如果有Notion配置且有页面ID，则发送到Notion
+        const shouldSendToNotion = notionConfig.apiKey && bvid && state.getNotionPageId(bvid);
+        
+        // 截图并自动保存到本地笔记
+        const note = await screenshotService.captureAndSave(shouldSendToNotion);
+        if (note) {
+          notification.success(shouldSendToNotion ? '截图已保存到笔记和Notion' : '截图已保存到笔记');
+          
+          // 刷新笔记面板（如果存在）
+          const notesPanel = document.querySelector('.notes-panel');
+          if (notesPanel && notesPanel.style.display !== 'none') {
+            window.notesPanel?.render();
+          }
+        }
+      } catch (error) {
+        console.error('[Main] 截图失败:', error);
+        notification.error('截图失败: ' + error.message);
+      }
+    });
+
+
     // 开始监听
     shortcutManager.startListening();
   }
@@ -147,11 +222,33 @@ class BilibiliSubtitleExtractor {
       notesPanel.togglePanel();
     });
 
-    GM_registerMenuCommand('速度控制', () => {
-      speedControlModal.show();
+    // 快捷键设置 - 全局可用
+    GM_registerMenuCommand('⌨️ 快捷键设置', () => {
+      logger.debug('Main', '快捷键设置菜单被点击');
+      logger.debug('Main', 'eventHandlers 是否存在:', !!eventHandlers);
+      logger.debug('Main', 'showShortcutConfigModal 是否存在:', !!eventHandlers?.showShortcutConfigModal);
+      
+      if (!eventHandlers || !eventHandlers.showShortcutConfigModal) {
+        console.error('[Main] eventHandlers 或其方法未正确加载');
+        notification.error('快捷键设置功能未正确加载');
+        return;
+      }
+      
+      eventHandlers.showShortcutConfigModal();
     });
 
     if (this.isBilibili) {
+      // 字幕面板位置重置
+      GM_registerMenuCommand('🔄 重置字幕面板位置', () => {
+        const container = document.getElementById('subtitle-container');
+        if (container) {
+          eventHandlers.resetContainerPosition(container);
+          // 不自动显示面板，让用户自己决定
+        } else {
+          notification.warning('字幕面板未初始化，请先加载视频');
+        }
+      });
+      
       GM_registerMenuCommand('SponsorBlock 设置', () => {
         sponsorBlockModal.show();
       });
@@ -161,10 +258,6 @@ class BilibiliSubtitleExtractor {
       helpModal.show();
     });
 
-    GM_registerMenuCommand('关于', () => {
-      notification.info('Bilibili Tools v1.0.0 - by geraldpeng & claude 4.5 sonnet');
-    });
-
     // 调试模式切换
     GM_registerMenuCommand(`🔧 调试模式 (${logger.isDebugMode() ? '开启' : '关闭'})`, () => {
       const newState = logger.toggleDebugMode();
@@ -172,16 +265,6 @@ class BilibiliSubtitleExtractor {
       if (newState) {
         notification.info('调试模式已开启，控制台将输出详细日志');
       }
-    });
-
-    GM_registerMenuCommand('性能报告', () => {
-      performanceMonitor.printReport();
-      const resourceStats = resourceManager.getStats();
-      const audioStats = audioContextPool.getStats();
-      console.group('📊 资源使用统计');
-      console.log('ResourceManager:', resourceStats);
-      console.log('AudioContextPool:', audioStats);
-      console.groupEnd();
     });
   }
 
@@ -278,7 +361,7 @@ class BilibiliSubtitleExtractor {
 
     // 监听AI总结开始事件
     eventBus.on(EVENTS.AI_SUMMARY_START, () => {
-      console.log('[App] AI总结开始，小球进入AI总结状态');
+      logger.debug('App', 'AI总结开始，小球进入AI总结状态');
       // 小球进入AI总结状态（更大幅度呼吸）
       if (this.ball) {
         this.ball.classList.remove('loading', 'active', 'no-subtitle', 'error');
@@ -301,7 +384,7 @@ class BilibiliSubtitleExtractor {
 
     // 监听AI总结完成事件
     eventBus.on(EVENTS.AI_SUMMARY_COMPLETE, (summary, videoKey) => {
-      console.log('[App] AI总结完成，恢复小球正常状态');
+      logger.debug('App', 'AI总结完成，恢复小球正常状态');
       notification.success('AI总结完成');
       if (this.container) {
         uiRenderer.updateAISummary(this.container, summary);
@@ -335,7 +418,7 @@ class BilibiliSubtitleExtractor {
     });
 
     eventBus.on(EVENTS.AI_SUMMARY_FAILED, (error) => {
-      console.log('[App] AI总结失败，恢复小球正常状态');
+      logger.debug('App', 'AI总结失败，恢复小球正常状态');
       notification.handleError(error, 'AI总结');
       // 恢复小球正常状态
       if (this.ball) {
@@ -395,19 +478,13 @@ class BilibiliSubtitleExtractor {
     
     if (cachedSummary) {
       uiRenderer.updateAISummary(this.container, cachedSummary);
-    } else if (state.ai.isSummarizing) {
-      // 如果正在总结，显示加载状态
-      const contentDiv = this.container.querySelector('.subtitle-content');
-      if (contentDiv) {
-        const summarySection = uiRenderer.renderAISummarySection(null, true);
-        contentDiv.insertBefore(summarySection, contentDiv.firstChild);
-      }
     }
+    // 不再显示加载状态，移除原来的else if分支
 
     // 绑定事件
     eventHandlers.bindSubtitlePanelEvents(this.container);
 
-    console.log('[App] 字幕面板已渲染');
+    logger.debug('App', '字幕面板已渲染');
   }
 
   /**
@@ -534,7 +611,7 @@ class BilibiliSubtitleExtractor {
 
       // 当BV号或CID改变时重新初始化
       if (url !== lastUrl && (currentBvid !== lastBvid || currentCid !== lastCid)) {
-        console.log('[App] 检测到视频切换:', { from: lastBvid, to: currentBvid });
+        logger.debug('App', '检测到视频切换:', { from: lastBvid, to: currentBvid });
         
         lastUrl = url;
         lastBvid = currentBvid;
@@ -584,14 +661,14 @@ class BilibiliSubtitleExtractor {
       clearInterval(checkInterval);
     };
 
-    console.log('[App] 视频切换监听已启动（使用 History API 劫持）');
+    logger.debug('App', '视频切换监听已启动（使用 History API 劫持）');
   }
 
   /**
    * 清理应用资源（增强版：清理所有性能优化模块）
    */
   cleanup() {
-    console.log('[App] 开始清理应用资源');
+    logger.debug('App', '开始清理应用资源');
     
     // 清理 URL 监听
     if (this.urlChangeCleanup) {
@@ -612,7 +689,7 @@ class BilibiliSubtitleExtractor {
     speedControlService.destroy();
     
     // 清理AudioContext池
-    audioContextPool.clear();
+    // audioContextPool.clear(); // Not implemented yet
     
     // 清理搜索索引
     searchIndex.clear();
@@ -623,7 +700,7 @@ class BilibiliSubtitleExtractor {
     // 清理资源管理器
     resourceManager.cleanup();
     
-    console.log('[App] 应用资源清理完成');
+    logger.debug('App', '应用资源清理完成');
   }
 }
 

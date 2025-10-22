@@ -13,7 +13,7 @@ export const TIMING = {
   SUBTITLE_ACTIVATION_DELAY: 1500,    // 激活字幕的延迟
   SUBTITLE_CAPTURE_DELAY: 500,        // 捕获字幕的延迟
   MENU_OPEN_DELAY: 500,               // 打开菜单的延迟
-  CLOSE_SUBTITLE_DELAY: 1000,         // 关闭字幕显示的延迟（延长以保证切换成功）
+  CLOSE_SUBTITLE_DELAY: 2000,         // 关闭字幕显示的延迟（延长以保证切换成功）
   VIDEO_SWITCH_DELAY: 2000,           // 视频切换后的延迟
   AUTO_ACTIONS_DELAY: 500,            // 自动操作的延迟
   
@@ -68,12 +68,32 @@ export const EVENTS = {
 };
 
 // ==================== AI默认配置 ====================
-const DEFAULT_PROMPT = `请用中文总结以下视频字幕内容，使用Markdown格式输出。
+// 第一个AI请求的默认提示词 - Markdown格式总结
+const DEFAULT_PROMPT_1 = `请用中文总结以下视频字幕内容，使用Markdown格式输出。
 
 要求：
-1. 在开头提供TL;DR（不超过50字的核心摘要）
+1. 在开头提供TL;DR的核心摘要
 2. 使用标题、列表等Markdown格式组织内容
 3. 突出关键信息和要点
+4. 分段落说明每一部分的内容
+5. 不要在总结中包含任何时间戳
+
+字幕内容：
+`;
+
+// 第二个AI请求的默认提示词 - JSON格式段落
+const DEFAULT_PROMPT_2 = `分析以下带时间戳的字幕，提取5-8个关键段落。
+
+重要：你的回复必须只包含JSON，不要有任何其他文字、解释或markdown标记。
+直接以{开始，以}结束。
+
+JSON格式要求：
+{"segments":[
+  {"timestamp":"分钟:秒","title":"标题(10字内)","summary":"内容总结(30-50字)"}
+]}
+
+示例（你的回复应该像这样）：
+{"segments":[{"timestamp":"00:15","title":"开场介绍","summary":"主持人介绍今天的主题和嘉宾背景"},{"timestamp":"02:30","title":"核心观点","summary":"讨论技术发展趋势和未来展望"}]}
 
 字幕内容：
 `;
@@ -98,7 +118,8 @@ export const AI_DEFAULT_CONFIGS = [
     url: 'https://openrouter.ai/api/v1/chat/completions',
     apiKey: '',
     model: 'alibaba/tongyi-deepresearch-30b-a3b:free',
-    prompt: DEFAULT_PROMPT,
+    prompt1: DEFAULT_PROMPT_1,
+    prompt2: DEFAULT_PROMPT_2,
     isOpenRouter: true
   },
   {
@@ -107,7 +128,8 @@ export const AI_DEFAULT_CONFIGS = [
     url: 'https://api.openai.com/v1/chat/completions',
     apiKey: '',
     model: 'gpt-3.5-turbo',
-    prompt: DEFAULT_PROMPT,
+    prompt1: DEFAULT_PROMPT_1,
+    prompt2: DEFAULT_PROMPT_2,
     isOpenRouter: false
   },
   {
@@ -116,7 +138,8 @@ export const AI_DEFAULT_CONFIGS = [
     url: 'https://api.siliconflow.cn/v1/chat/completions',
     apiKey: '',
     model: 'Qwen/Qwen2.5-7B-Instruct',
-    prompt: DEFAULT_PROMPT,
+    prompt1: DEFAULT_PROMPT_1,
+    prompt2: DEFAULT_PROMPT_2,
     isOpenRouter: false
   },
   {
@@ -125,7 +148,8 @@ export const AI_DEFAULT_CONFIGS = [
     url: 'https://api.deepseek.com/v1/chat/completions',
     apiKey: '',
     model: 'deepseek-chat',
-    prompt: DEFAULT_PROMPT,
+    prompt1: DEFAULT_PROMPT_1,
+    prompt2: DEFAULT_PROMPT_2,
     isOpenRouter: false
   },
   {
@@ -134,16 +158,18 @@ export const AI_DEFAULT_CONFIGS = [
     url: 'https://api.moonshot.cn/v1/chat/completions',
     apiKey: '',
     model: 'moonshot-v1-8k',
-    prompt: DEFAULT_PROMPT,
+    prompt1: DEFAULT_PROMPT_1,
+    prompt2: DEFAULT_PROMPT_2,
     isOpenRouter: false
   },
   {
     id: 'zhipu',
-    name: '智谱AI',
+    name: '智谱清言',
     url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
     apiKey: '',
     model: 'glm-4-flash',
-    prompt: DEFAULT_PROMPT,
+    prompt1: DEFAULT_PROMPT_1,
+    prompt2: DEFAULT_PROMPT_2,
     isOpenRouter: false
   },
   {
@@ -152,16 +178,18 @@ export const AI_DEFAULT_CONFIGS = [
     url: 'https://api.lingyiwanwu.com/v1/chat/completions',
     apiKey: '',
     model: 'yi-large',
-    prompt: DEFAULT_PROMPT,
+    prompt1: DEFAULT_PROMPT_1,
+    prompt2: DEFAULT_PROMPT_2,
     isOpenRouter: false
   },
   {
     id: 'dashscope',
-    name: '阿里云百炼',
+    name: '通义千问',
     url: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
     apiKey: '',
     model: 'qwen-plus',
-    prompt: DEFAULT_PROMPT,
+    prompt1: DEFAULT_PROMPT_1,
+    prompt2: DEFAULT_PROMPT_2,
     isOpenRouter: false
   },
   {
@@ -170,7 +198,8 @@ export const AI_DEFAULT_CONFIGS = [
     url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
     apiKey: '',
     model: 'gemini-1.5-flash',
-    prompt: DEFAULT_PROMPT,
+    prompt1: DEFAULT_PROMPT_1,
+    prompt2: DEFAULT_PROMPT_2,
     isOpenRouter: false
   }
 ];

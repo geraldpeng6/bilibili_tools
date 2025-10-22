@@ -10,6 +10,10 @@ const NOTES_CONFIG = {
   BLUE_DOT_SIZE: 14,
   BLUE_DOT_COLOR: '#feebea',
   BLUE_DOT_HIDE_TIMEOUT: 5000,
+  MAX_SCREENSHOTS: 10, // 最多保存10个截图
+  MAX_TEXT_NOTES: 100, // 最多保存100条文本笔记
+  STORAGE_WARNING_SIZE: 4 * 1024 * 1024, // 4MB时警告
+  STORAGE_CLEANUP_SIZE: 4.5 * 1024 * 1024, // 4.5MB时自动清理
 };
 
 class NotesService {
@@ -24,11 +28,11 @@ class NotesService {
    * 初始化笔记服务
    */
   init() {
-    logger.info('NotesService', '初始化笔记服务...');
+    logger.debug('NotesService', '初始化笔记服务...');
     try {
       this.createBlueDot();
       this.initSelectionListener();
-      logger.info('NotesService', '✓ 笔记服务初始化成功');
+      logger.debug('NotesService', '✓ 笔记服务初始化成功');
     } catch (error) {
       logger.error('NotesService', '✗ 初始化失败:', error);
     }
@@ -54,30 +58,128 @@ class NotesService {
    */
   saveNotes(notes) {
     try {
-      localStorage.setItem(NOTES_CONFIG.STORAGE_KEY, JSON.stringify(notes));
+      // 尝试保存
+      const dataStr = JSON.stringify(notes);
+      const dataSize = new Blob([dataStr]).size;
+      
+      // 检查存储大小
+      if (dataSize > NOTES_CONFIG.STORAGE_CLEANUP_SIZE) {
+        logger.warn('NotesService', '笔记存储空间过大，执行自动清理');
+        notes = this.cleanupNotes(notes);
+      }
+      
+      try {
+        localStorage.setItem(NOTES_CONFIG.STORAGE_KEY, JSON.stringify(notes));
+      } catch (quotaError) {
+        // 如果还是超出配额，强制清理旧数据
+        console.error('存储配额超限，强制清理旧数据');
+        notes = this.forceCleanupNotes(notes);
+        localStorage.setItem(NOTES_CONFIG.STORAGE_KEY, JSON.stringify(notes));
+      }
     } catch (error) {
       console.error('保存笔记数据失败:', error);
+      // 如果是配额错误，尝试清理后重试
+      if (error.name === 'QuotaExceededError') {
+        console.error('存储配额已满，清理旧数据后重试');
+        const cleanedNotes = this.forceCleanupNotes(notes);
+        try {
+          localStorage.setItem(NOTES_CONFIG.STORAGE_KEY, JSON.stringify(cleanedNotes));
+          logger.debug('NotesService', '清理后保存成功');
+        } catch (retryError) {
+          console.error('清理后仍然失败:', retryError);
+          throw retryError;
+        }
+      }
+      throw error;
     }
   }
 
   /**
+   * 清理笔记（保留最新的）
+   */
+  cleanupNotes(notes) {
+    const screenshots = notes.filter(n => n.type === 'screenshot');
+    const textNotes = notes.filter(n => n.type !== 'screenshot');
+    
+    // 限制截图数量
+    const keptScreenshots = screenshots.slice(0, NOTES_CONFIG.MAX_SCREENSHOTS);
+    // 限制文本笔记数量
+    const keptTextNotes = textNotes.slice(0, NOTES_CONFIG.MAX_TEXT_NOTES);
+    
+    logger.debug('NotesService', `清理笔记: 保留 ${keptScreenshots.length}/${screenshots.length} 个截图, ${keptTextNotes.length}/${textNotes.length} 条文本`);
+    
+    // 合并并按时间排序
+    return [...keptScreenshots, ...keptTextNotes].sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  /**
+   * 强制清理（更激进的清理）
+   */
+  forceCleanupNotes(notes) {
+    const screenshots = notes.filter(n => n.type === 'screenshot');
+    const textNotes = notes.filter(n => n.type !== 'screenshot');
+    
+    // 强制只保留最新的5个截图和50条文本
+    const keptScreenshots = screenshots.slice(0, 5);
+    const keptTextNotes = textNotes.slice(0, 50);
+    
+    logger.warn('NotesService', `强制清理: 保留 ${keptScreenshots.length}/${screenshots.length} 个截图, ${keptTextNotes.length}/${textNotes.length} 条文本`);
+    
+    return [...keptScreenshots, ...keptTextNotes].sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  /**
    * 添加新笔记
-   * @param {string} content - 笔记内容
-   * @param {string} url - 来源URL
+   * @param {string|Object} contentOrOptions - 笔记内容或选项对象
+   * @param {string} url - 来源URL（当第一个参数是字符串时使用）
    * @returns {Object} 新添加的笔记对象
    */
-  addNote(content, url) {
-    logger.info('NotesService', `添加新笔记，内容长度: ${content.length}`);
-    
+  addNote(contentOrOptions, url) {
     try {
-      const note = {
-        id: Date.now() + Math.random().toString(36).substr(2, 9),
-        content: content.trim(),
-        url: url,
-        timestamp: Date.now()
-      };
+      let note;
+      
+      // 支持两种调用方式：
+      // 1. addNote(content, url) - 文本笔记
+      // 2. addNote({content, type, ...}) - 对象参数（截图等）
+      if (typeof contentOrOptions === 'object') {
+        const options = contentOrOptions;
+        note = {
+          id: Date.now() + Math.random().toString(36).substr(2, 9),
+          content: options.content.trim(),
+          url: options.url || window.location.href,
+          createdAt: Date.now(), // 保存创建时间
+          type: options.type || 'text',
+          ...options // 保留其他属性（如imageData, timeString, timestamp等）
+        };
+        // 如果没有传入timestamp，使用createdAt
+        if (!note.timestamp) {
+          note.timestamp = note.createdAt;
+        }
+        logger.info('NotesService', `添加新笔记(${note.type})，内容: ${options.content}`);
+      } else {
+        note = {
+          id: Date.now() + Math.random().toString(36).substr(2, 9),
+          content: contentOrOptions.trim(),
+          url: url,
+          timestamp: Date.now(),
+          type: 'text'
+        };
+        logger.info('NotesService', `添加新笔记，内容长度: ${contentOrOptions.length}`);
+      }
 
-      const notes = this.getAllNotes();
+      let notes = this.getAllNotes();
+      
+      // 如果是截图，先检查截图数量
+      if (note.type === 'screenshot') {
+        const screenshots = notes.filter(n => n.type === 'screenshot');
+        if (screenshots.length >= NOTES_CONFIG.MAX_SCREENSHOTS) {
+          logger.warn('NotesService', `截图数量超过限制(${NOTES_CONFIG.MAX_SCREENSHOTS})，删除最旧的截图`);
+          // 找到最旧的截图并删除
+          const oldestScreenshot = screenshots[screenshots.length - 1];
+          notes = notes.filter(n => n.id !== oldestScreenshot.id);
+        }
+      }
+      
       notes.unshift(note);
       this.saveNotes(notes);
       
@@ -85,6 +187,16 @@ class NotesService {
       return note;
     } catch (error) {
       logger.error('NotesService', '✗ 添加笔记失败:', error);
+      
+      // 如果是存储配额错误，提示用户
+      if (error.name === 'QuotaExceededError' || error.message?.includes('exceeded')) {
+        console.error('[NotesService] 存储空间不足，请清理部分笔记');
+        // 可以通过UI提示用户
+        if (window.notification) {
+          window.notification.error('存储空间不足，已自动清理部分旧笔记');
+        }
+      }
+      
       throw error;
     }
   }
@@ -118,7 +230,9 @@ class NotesService {
     const groups = {};
 
     notes.forEach(note => {
-      const date = this.formatDate(note.timestamp);
+      // 使用创建时间来分组（如果有createdAt用createdAt，否则用timestamp）
+      const groupTimestamp = note.createdAt || note.timestamp;
+      const date = this.formatDate(groupTimestamp);
       if (!groups[date]) {
         groups[date] = [];
       }
@@ -127,8 +241,9 @@ class NotesService {
 
     return Object.keys(groups)
       .sort((a, b) => {
-        const dateA = groups[a][0].timestamp;
-        const dateB = groups[b][0].timestamp;
+        // 使用第一个笔记的创建时间来排序分组
+        const dateA = groups[a][0].createdAt || groups[a][0].timestamp;
+        const dateB = groups[b][0].createdAt || groups[b][0].timestamp;
         return dateB - dateA;
       })
       .map(date => ({
@@ -242,14 +357,14 @@ class NotesService {
       dot.style.top = `${y}px`;
       dot.style.display = 'block';
       
-      logger.debug('NotesService', `✓ 保存点已显示`);
+      // logger.debug('NotesService', `✓ 保存点已显示`);
 
       if (this.blueDotHideTimeout) {
         clearTimeout(this.blueDotHideTimeout);
       }
 
       this.blueDotHideTimeout = setTimeout(() => {
-        logger.debug('NotesService', '保存点自动隐藏超时触发');
+        // logger.debug('NotesService', '保存点自动隐藏超时触发');
         this.hideBlueDot();
         this.savedSelectionText = '';
       }, NOTES_CONFIG.BLUE_DOT_HIDE_TIMEOUT);
@@ -262,12 +377,12 @@ class NotesService {
    * 隐藏蓝点
    */
   hideBlueDot() {
-    logger.debug('NotesService', '隐藏保存点');
+    // logger.debug('NotesService', '隐藏保存点');
     
     try {
       if (this.blueDot) {
         this.blueDot.style.display = 'none';
-        logger.debug('NotesService', '✓ 保存点已隐藏');
+        // logger.debug('NotesService', '✓ 保存点已隐藏');
       }
       if (this.blueDotHideTimeout) {
         clearTimeout(this.blueDotHideTimeout);
@@ -282,7 +397,7 @@ class NotesService {
    * 处理蓝点点击事件
    */
   handleBlueDotClick(e) {
-    logger.debug('NotesService', '保存点被点击');
+    logger.info('NotesService', '保存点被点击 - 保存笔记');
     
     try {
       if (e) {
@@ -297,7 +412,7 @@ class NotesService {
         const selection = window.getSelection();
         if (selection.rangeCount > 0) {
           selection.removeAllRanges();
-          logger.debug('NotesService', '已清除文本选择');
+          // logger.debug('NotesService', '已清除文本选择');
         }
       } else {
         logger.warn('NotesService', '⚠ 没有保存的选中文本');
@@ -317,7 +432,17 @@ class NotesService {
     
     try {
       document.addEventListener('mouseup', (e) => {
-        logger.debug('NotesService', 'mouseup 事件触发');
+        // logger.debug('NotesService', 'mouseup 事件触发');
+        
+        // 如果点击的是时间戳段落元素，不处理文字选择
+        const sectionItem = e.target.closest('.section-item');
+        const isTimeRelated = e.target.closest('.time-btn, .segment-item, .ai-segments-section');
+        
+        if (sectionItem || isTimeRelated) {
+          logger.debug('NotesService', '点击的是时间戳段落，忽略文字选择');
+          this.hideBlueDot();
+          return;
+        }
         
         if (this.selectionTimeout) {
           clearTimeout(this.selectionTimeout);
@@ -326,29 +451,29 @@ class NotesService {
         // 保存鼠标位置
         const mouseX = e.clientX;
         const mouseY = e.clientY;
-        logger.debug('NotesService', `鼠标位置: clientX=${mouseX}, clientY=${mouseY}`);
+        // logger.debug('NotesService', `鼠标位置: clientX=${mouseX}, clientY=${mouseY}`);
 
         this.selectionTimeout = setTimeout(() => {
           try {
             const selection = window.getSelection();
             const selectedText = selection.toString().trim();
 
-            logger.debug('NotesService', `选中文本长度: ${selectedText.length}`);
+            // logger.debug('NotesService', `选中文本长度: ${selectedText.length}`);
             
             if (selectedText && selection.rangeCount > 0) {
-              logger.debug('NotesService', `检测到文本选择`);
+              logger.debug('NotesService', `检测到文本选择: "${selectedText.substring(0, 30)}${selectedText.length > 30 ? '...' : ''}"`);
               this.savedSelectionText = selectedText;
 
               // 使用鼠标位置 + 偏移量来显示保存点
               const x = mouseX + window.scrollX + 10;
               const y = mouseY + window.scrollY + 10;
               
-              logger.debug('NotesService', `滚动偏移: scrollX=${window.scrollX}, scrollY=${window.scrollY}`);
-              logger.debug('NotesService', `计算位置（鼠标附近）: x=${x}, y=${y}`);
+              // logger.debug('NotesService', `滚动偏移: scrollX=${window.scrollX}, scrollY=${window.scrollY}`);
+              // logger.debug('NotesService', `计算位置（鼠标附近）: x=${x}, y=${y}`);
 
               this.showBlueDot(x, y);
             } else {
-              logger.debug('NotesService', '没有选中文本或选择范围为空');
+              // logger.debug('NotesService', '没有选中文本或选择范围为空');
               this.savedSelectionText = '';
               this.hideBlueDot();
             }
@@ -359,12 +484,21 @@ class NotesService {
       });
 
       document.addEventListener('mousedown', (e) => {
-        // 如果点击的是蓝点或其子元素，不清空
-        if (this.blueDot && (e.target === this.blueDot || this.blueDot.contains(e.target))) {
-          logger.debug('NotesService', 'mousedown 在保存点上，忽略');
+        // 如果点击的是时间戳段落元素，不处理
+        const sectionItem = e.target.closest('.section-item');
+        const isTimeRelated = e.target.closest('.time-btn, .segment-item, .ai-segments-section');
+        
+        if (sectionItem || isTimeRelated) {
+          logger.debug('NotesService', 'mousedown 在段落元素上，忽略');
           return;
         }
-        logger.debug('NotesService', 'mousedown 事件，清空选中文本并隐藏保存点');
+        
+        // 如果点击的是蓝点或其子元素，不清空
+        if (this.blueDot && (e.target === this.blueDot || this.blueDot.contains(e.target))) {
+          // logger.debug('NotesService', 'mousedown 在保存点上，忽略');
+          return;
+        }
+        // logger.debug('NotesService', 'mousedown 事件，清空选中文本并隐藏保存点');
         this.savedSelectionText = '';
         this.hideBlueDot();
       });
