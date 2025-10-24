@@ -64,15 +64,25 @@ class BilibiliSubtitleExtractor {
     
     // 设置新的错误处理器
     window.onerror = (message, source, lineno, colno, error) => {
+      // 安全地转换message为字符串
+      const messageStr = String(message || '');
+      const sourceStr = String(source || '');
+      
       // 检查错误是否来自其他扩展
-      if (source && (source.includes('extension://') || source.includes('content.js'))) {
+      if (sourceStr && (sourceStr.includes('extension://') || sourceStr.includes('content.js'))) {
         // 忽略来自其他扩展的错误
-        logger.debug('Main', '忽略来自其他扩展的错误:', message);
+        logger.debug('Main', '忽略来自其他扩展的错误:', messageStr);
         return true; // 阻止错误继续传播
       }
       
+      // 忽略nc-loader（阿里云验证码）的错误
+      if (sourceStr.includes('nc-loader') || messageStr.includes('addIceCandidate')) {
+        logger.debug('Main', '忽略第三方组件错误');
+        return true;
+      }
+      
       // 对于Extension context invalidated错误，直接忽略
-      if (message && message.includes('Extension context invalidated')) {
+      if (messageStr.includes('Extension context invalidated')) {
         logger.debug('Main', '忽略扩展上下文失效错误');
         return true;
       }
@@ -86,10 +96,22 @@ class BilibiliSubtitleExtractor {
     
     // 处理未捕获的Promise错误
     window.addEventListener('unhandledrejection', (event) => {
-      if (event.reason && event.reason.message && 
-          event.reason.message.includes('Extension context invalidated')) {
+      // 安全地获取错误信息
+      const reason = event.reason;
+      const reasonMessage = reason ? String(reason.message || reason) : '';
+      
+      // 忽略扩展上下文失效错误
+      if (reasonMessage.includes('Extension context invalidated')) {
         event.preventDefault(); // 阻止错误显示在控制台
         logger.debug('Main', '忽略Promise中的扩展上下文失效错误');
+        return;
+      }
+      
+      // 忽略第三方组件错误
+      if (reasonMessage.includes('addIceCandidate') || reasonMessage.includes('nc-loader')) {
+        event.preventDefault();
+        logger.debug('Main', '忽略Promise中的第三方组件错误');
+        return;
       }
     });
     
@@ -195,6 +217,25 @@ class BilibiliSubtitleExtractor {
       }
     });
 
+    // 增加播放速度
+    shortcutManager.register('speedIncrease', () => {
+      speedControlService.adjustBaseSpeed(0.1);
+    });
+
+    // 减少播放速度
+    shortcutManager.register('speedDecrease', () => {
+      speedControlService.adjustBaseSpeed(-0.1);
+    });
+
+    // 重置播放速度（双击逗号键）
+    shortcutManager.register('speedReset', () => {
+      speedControlService.resetToNormalSpeed();
+    });
+
+    // 2倍速（双击句号键）
+    shortcutManager.register('speedDouble', () => {
+      speedControlService.setToDoubleSpeed();
+    });
 
     // 开始监听
     shortcutManager.startListening();
@@ -452,14 +493,6 @@ class BilibiliSubtitleExtractor {
         }
       }
     });
-
-    // 键盘快捷键（Command+B 或 Ctrl+B）
-    document.addEventListener('keydown', (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
-        e.preventDefault();
-        state.togglePanel();
-      }
-    });
   }
 
   /**
@@ -511,18 +544,18 @@ class BilibiliSubtitleExtractor {
     });
 
     // AI总结完成后，检查是否需要自动发送Notion
-    eventBus.on(EVENTS.AI_SUMMARY_COMPLETE, async () => {
+    eventBus.on(EVENTS.AI_SUMMARY_COMPLETE, async (summary) => {
       const notionAutoEnabled = config.getNotionAutoSendEnabled();
       const notionConfig = config.getNotionConfig();
 
-      if (notionAutoEnabled && notionConfig.apiKey) {
-        const subtitleData = state.getSubtitleData();
-        if (subtitleData) {
-          try {
-            await notionService.sendSubtitle(subtitleData, true);
-          } catch (error) {
-            console.error('[App] 自动发送失败:', error);
-          }
+      if (notionAutoEnabled && notionConfig.apiKey && summary) {
+        try {
+          logger.debug('App', '开始自动发送AI总结到Notion');
+          await notionService.sendAISummary(summary);
+          notification.success('已自动发送AI总结到Notion');
+        } catch (error) {
+          console.error('[App] 自动发送AI总结到Notion失败:', error);
+          notification.error('自动发送Notion失败: ' + error.message);
         }
       }
     });

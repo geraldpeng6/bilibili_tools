@@ -28,7 +28,6 @@ class UIRenderer {
     let html = `
       <div class="subtitle-header">
         <div class="subtitle-header-left">
-          <span class="subtitle-status-icon" title="AI助手">${ICONS.AI_ASSISTANT}</span>
         </div>
         <div class="subtitle-header-right">
           <div class="subtitle-search-container">
@@ -545,6 +544,32 @@ class UIRenderer {
             自动发送（获取字幕后自动发送到Notion）
           </label>
         </div>
+
+        <div class="config-field">
+          <label style="font-weight: 600; margin-bottom: 10px; display: block;">📋 自动添加内容选项</label>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: normal;">
+              <input type="checkbox" id="notion-content-video-info" checked>
+              <span>📹 视频信息</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: normal;">
+              <input type="checkbox" id="notion-content-summary" checked>
+              <span>📊 视频总结</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: normal;">
+              <input type="checkbox" id="notion-content-segments" checked>
+              <span>⏱️ 时间戳段落（含截图）</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: normal;">
+              <input type="checkbox" id="notion-content-subtitles" checked>
+              <span>📝 字幕内容</span>
+            </label>
+          </div>
+          <div class="config-help" style="margin-top: 10px;">
+            选择要自动添加到Notion的内容。未勾选的内容不会被发送。
+          </div>
+        </div>
+
           <div id="notion-status-message"></div>
         </div>
         <div class="config-footer">
@@ -747,6 +772,18 @@ class UIRenderer {
                       placeholder="点击设置"
                       data-key="${key}"
                     >
+                    <button class="shortcut-mode-btn shortcut-hold-btn ${shortcut.holdMode ? 'active' : ''}" 
+                            data-key="${key}" 
+                            data-mode="hold"
+                            title="长按此键触发">
+                      长按
+                    </button>
+                    <button class="shortcut-mode-btn shortcut-double-btn ${shortcut.doubleClickMode ? 'active' : ''}" 
+                            data-key="${key}" 
+                            data-mode="double"
+                            title="双击此键触发">
+                      双击
+                    </button>
                     <button class="shortcut-reset-btn" data-key="${key}">重置</button>
                   </div>
                 </div>

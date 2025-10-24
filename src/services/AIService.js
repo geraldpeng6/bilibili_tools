@@ -8,6 +8,7 @@ import state from '../state/StateManager.js';
 import eventBus from '../utils/EventBus.js';
 import performanceMonitor from '../utils/PerformanceMonitor.js';
 import notionService from './NotionService.js';
+import notesService from './NotesService.js';
 import logger from '../utils/DebugLogger.js';
 import { EVENTS, TIMING } from '../constants.js';
 import { withTimeout } from '../utils/helpers.js';
@@ -117,6 +118,20 @@ class AIService {
 
         // 完成总结
         state.finishAISummary(combinedResult);
+        
+        // 自动保存AI总结到笔记
+        try {
+          const videoInfo = state.getVideoInfo();
+          const summaryNote = notesService.addAISummary({
+            summary: combinedResult.markdown,
+            segments: combinedResult.segments,
+            videoInfo: videoInfo,
+            videoBvid: videoInfo?.bvid
+          });
+          logger.debug('AIService', '✓ AI总结已保存到笔记，笔记ID:', summaryNote.id);
+        } catch (error) {
+          logger.warn('AIService', '保存AI总结到笔记失败:', error);
+        }
         
         // 如果配置了Notion且有页面，自动发送AI总结
         try {

@@ -115,6 +115,24 @@ class ScreenshotService {
 
       notification.success(`截图已保存 (${timeString})`);
 
+      // 4.5 尝试添加到最近的AI总结笔记
+      try {
+        const allNotes = notesService.getAllNotes();
+        const summaryNote = allNotes.find(n => n.type === 'ai-summary');
+        
+        if (summaryNote && summaryNote.segments && summaryNote.segments.length > 0) {
+          notesService.addScreenshotToSummary(summaryNote.id, {
+            imageData: base64,
+            timeString,
+            videoTimestamp: timestamp
+          });
+          logger.debug('[Screenshot] 截图已添加到AI总结笔记');
+        }
+      } catch (error) {
+        logger.warn('[Screenshot] 添加截图到AI总结失败:', error);
+        // 不影响主流程
+      }
+
       // 5. 如果需要发送到Notion
       if (sendToNotion && config.isNotionConfigured()) {
         await this.sendToNotion(blob, timestamp, timeString, videoTitle);
@@ -156,8 +174,8 @@ class ScreenshotService {
       const pageId = await this.getOrCreateNotionPage(videoTitle, notionConfig);
       logger.debug('[Screenshot] 目标页面ID:', pageId);
 
-      // 3. 追加截图block到页面
-      await this.appendScreenshotBlock(pageId, fileUploadId, timeString, notionConfig);
+      // 3. 智能插入截图block到页面（根据时间戳）
+      await this.insertScreenshotAtTimestamp(pageId, fileUploadId, timestamp, timeString, notionConfig);
       logger.info('[Screenshot] ✓ 截图已成功发送到Notion');
 
       notification.success('截图已发送到Notion');
@@ -325,14 +343,230 @@ class ScreenshotService {
   }
 
   /**
-   * Step 3: 追加截图block到Notion页面
+   * Step 3: 根据时间戳智能插入截图到Notion页面
    * @param {string} pageId - 页面ID
-   * @param {string} fileUploadId - 文件上传ID（从Step 1获得）
-   * @param {string} timeString - 时间戳字符串
+   * @param {string} fileUploadId - 文件上传ID
+   * @param {number} timestamp - 截图时间戳（秒）
+   * @param {string} timeString - 时间戳字符串（格式化）
    * @param {Object} notionConfig - Notion配置
    */
-  async appendScreenshotBlock(pageId, fileUploadId, timeString, notionConfig) {
-    logger.debug('[Screenshot] Step 3: 附加截图到页面:', pageId);
+  async insertScreenshotAtTimestamp(pageId, fileUploadId, timestamp, timeString, notionConfig) {
+    logger.info('[Screenshot] ========== 开始智能插入截图 ==========');
+    logger.info('[Screenshot] 截图时间戳:', timeString, '(', timestamp, '秒)');
+    logger.debug('[Screenshot] 目标页面ID:', pageId);
+    logger.debug('[Screenshot] 图片上传ID:', fileUploadId);
+    
+    try {
+      // 1. 获取页面的所有blocks
+      logger.debug('[Screenshot] Step 1: 获取页面blocks');
+      const blocks = await notionService.getPageBlocks(notionConfig.apiKey, pageId);
+      logger.info('[Screenshot] 页面共有', blocks.length, '个blocks');
+      
+      // 2. 找到“⏱️ 时间戳段落”标题的位置
+      logger.debug('[Screenshot] Step 2: 查找时间戳段落标题');
+      let segmentsStartIndex = -1;
+      for (let i = 0; i < blocks.length; i++) {
+        const block = blocks[i];
+        const blockType = block.type;
+        const content = block[blockType]?.rich_text?.[0]?.text?.content || '';
+        
+        logger.debug(`[Screenshot]   Block ${i}: type=${blockType}, content="${content.substring(0, 50)}..."`);
+        
+        if ((blockType === 'heading_2' || blockType === 'heading_3') && 
+            content.includes('⏱️ 时间戳段落')) {
+          segmentsStartIndex = i;
+          logger.info('[Screenshot] ✓ 找到时间戳段落标题，位置:', i);
+          break;
+        }
+      }
+      
+      if (segmentsStartIndex === -1) {
+        logger.warn('[Screenshot] ✗ 未找到时间戳段落，追加到页面末尾');
+        return await this.appendScreenshotToEnd(pageId, fileUploadId, timeString, notionConfig);
+      }
+      
+      // 3. 解析时间戳段落，找到合适的toggle block
+      logger.debug('[Screenshot] Step 3: 解析每个段落的时间戳');
+      let targetToggleId = null;
+      let targetToggleTime = null;
+      let bestMatchTimestamp = -1;
+      
+      for (let i = segmentsStartIndex + 1; i < blocks.length; i++) {
+        const block = blocks[i];
+        const blockType = block.type;
+        
+        // 如果遇到下一个大标题，说明时间戳段落结束了
+        if (blockType === 'heading_2') {
+          logger.debug(`[Screenshot]   Block ${i}: 遇到heading_2，段落区域结束`);
+          break;
+        }
+        
+        // 查找toggle block（新的段落格式）
+        if (blockType === 'toggle') {
+          const text = block.toggle?.rich_text?.[0]?.text?.content || '';
+          logger.debug(`[Screenshot]   Block ${i}: type=toggle, content="${text}"`);
+          
+          const timeMatch = text.match(/\[?(\d{1,2}):(\d{2})\]?/);
+          
+          if (timeMatch) {
+            const minutes = parseInt(timeMatch[1], 10);
+            const seconds = parseInt(timeMatch[2], 10);
+            const blockTimestamp = minutes * 60 + seconds;
+            
+            logger.info(`[Screenshot]   → 解析时间戳: ${timeMatch[0]} = ${blockTimestamp}秒`);
+            logger.debug(`[Screenshot]   比较: blockTimestamp(${blockTimestamp}) vs screenshot(${timestamp})`);
+            
+            // 找到截图时间戳应该属于的段落
+            // 选择最接近且不大于截图时间的段落
+            if (blockTimestamp <= timestamp && blockTimestamp > bestMatchTimestamp) {
+              targetToggleId = block.id;
+              targetToggleTime = timeMatch[0];
+              bestMatchTimestamp = blockTimestamp;
+              logger.info(`[Screenshot]   ✓ 更新最佳匹配: ${timeMatch[0]} (block ${i}, id: ${block.id})`);
+            } else if (blockTimestamp > timestamp) {
+              // 已经超过截图时间，停止搜索
+              logger.debug(`[Screenshot]   → 超过截图时间，停止搜索`);
+              break;
+            }
+          } else {
+            logger.debug(`[Screenshot]   → 未toggle但无法解析时间戳`);
+          }
+        }
+        
+        // 兼容旧格式: bulleted_list_item
+        if (blockType === 'bulleted_list_item') {
+          const text = block.bulleted_list_item?.rich_text?.[0]?.text?.content || '';
+          logger.debug(`[Screenshot]   Block ${i}: type=bulleted_list_item, content="${text}"`);
+          
+          const timeMatch = text.match(/\[?(\d{1,2}):(\d{2})\]?/);
+          
+          if (timeMatch) {
+            const minutes = parseInt(timeMatch[1], 10);
+            const seconds = parseInt(timeMatch[2], 10);
+            const blockTimestamp = minutes * 60 + seconds;
+            
+            logger.info(`[Screenshot]   → 解析时间戳: ${timeMatch[0]} = ${blockTimestamp}秒`);
+            
+            if (blockTimestamp <= timestamp && blockTimestamp > bestMatchTimestamp) {
+              targetToggleId = block.id;
+              targetToggleTime = timeMatch[0];
+              bestMatchTimestamp = blockTimestamp;
+              logger.info(`[Screenshot]   ✓ 更新最佳匹配: ${timeMatch[0]} (list item)`);
+            } else if (blockTimestamp > timestamp) {
+              break;
+            }
+          }
+        }
+      }
+      
+      // 4. 构建截图blocks
+      logger.debug('[Screenshot] Step 4: 构建截图blocks');
+      const screenshotBlocks = [
+        {
+          object: 'block',
+          type: 'paragraph',
+          paragraph: {
+            rich_text: [
+              {
+                type: 'text',
+                text: { content: `📸 ${timeString}` },
+                annotations: { color: 'gray' }
+              }
+            ]
+          }
+        },
+        {
+          object: 'block',
+          type: 'image',
+          image: {
+            type: 'file_upload',
+            file_upload: {
+              id: fileUploadId
+            }
+          }
+        }
+      ];
+      
+      // 5. 插入截图到对应的toggle block下
+      if (targetToggleId) {
+        logger.info('[Screenshot] ========================================');
+        logger.info('[Screenshot] ✓ 找到最佳匹配段落:', targetToggleTime);
+        logger.info('[Screenshot] ✓ 目标toggle ID:', targetToggleId);
+        logger.info('[Screenshot] ✓ 准备插入截图作为children');
+        logger.info('[Screenshot] ========================================');
+        
+        await this.insertBlocksAsChildren(targetToggleId, screenshotBlocks, notionConfig);
+        logger.info('[Screenshot] ✓✓✓ 截图插入成功!');
+      } else {
+        logger.warn('[Screenshot] ✗ 未找到合适的时间戳段落');
+        logger.warn('[Screenshot] → 将截图追加到页面末尾');
+        await this.appendScreenshotToEnd(pageId, fileUploadId, timeString, notionConfig);
+      }
+      
+    } catch (error) {
+      logger.error('[Screenshot] 智能插入失败，降级为追加到末尾:', error);
+      await this.appendScreenshotToEnd(pageId, fileUploadId, timeString, notionConfig);
+    }
+  }
+  
+  /**
+   * 将blocks作为指定block的children插入
+   * @param {string} parentBlockId - 父block ID（如list item）
+   * @param {Array} blocks - 要插入的blocks
+   * @param {Object} notionConfig - Notion配置
+   */
+  async insertBlocksAsChildren(parentBlockId, blocks, notionConfig) {
+    logger.debug('[Screenshot] ========== insertBlocksAsChildren ==========');
+    logger.debug('[Screenshot] 父级block ID:', parentBlockId);
+    logger.debug('[Screenshot] 待插入blocks数量:', blocks.length);
+    logger.debug('[Screenshot] Blocks详情:', JSON.stringify(blocks, null, 2));
+    
+    const url = `https://api.notion.com/v1/blocks/${parentBlockId}/children`;
+    
+    return new Promise((resolve, reject) => {
+      const payload = { children: blocks };
+      logger.debug('[Screenshot] API请求URL:', url);
+      logger.debug('[Screenshot] API请求payload:', JSON.stringify(payload, null, 2));
+      
+      GM_xmlhttpRequest({
+        method: 'PATCH',
+        url,
+        headers: {
+          'Authorization': `Bearer ${notionConfig.apiKey}`,
+          'Content-Type': 'application/json',
+          'Notion-Version': '2022-06-28'
+        },
+        data: JSON.stringify(payload),
+        timeout: 30000,
+        onload: (response) => {
+          logger.info('[Screenshot] API响应状态:', response.status);
+          if (response.status === 200) {
+            logger.info('[Screenshot] ✓ 截图已成功插入为children');
+            logger.debug('[Screenshot] 响应内容:', response.responseText.substring(0, 200) + '...');
+            resolve(JSON.parse(response.responseText));
+          } else {
+            logger.error('[Screenshot] ✗ 插入失败，状态码:', response.status);
+            logger.error('[Screenshot] 错误响应:', response.responseText);
+            reject(new Error(`插入失败: ${response.status}`));
+          }
+        },
+        onerror: (error) => {
+          logger.error('[Screenshot] ✗ 网络请求错误:', error);
+          reject(error);
+        },
+        ontimeout: () => {
+          logger.error('[Screenshot] ✗ 请求超时');
+          reject(new Error('请求超时'));
+        }
+      });
+    });
+  }
+  
+  /**
+   * 追加截图到页面末尾（降级方案）
+   */
+  async appendScreenshotToEnd(pageId, fileUploadId, timeString, notionConfig) {
+    logger.debug('[Screenshot] 追加截图到页面末尾');
     const url = `https://api.notion.com/v1/blocks/${pageId}/children`;
 
     const data = {
@@ -353,16 +587,14 @@ class ScreenshotService {
           object: 'block',
           type: 'image',
           image: {
-            type: 'file_upload',  // ← 修改：使用 file_upload 而非 external
+            type: 'file_upload',
             file_upload: {
-              id: fileUploadId    // ← 修改：使用 file_upload_id
+              id: fileUploadId
             }
           }
         }
       ]
     };
-
-    logger.debug('[Screenshot] 附加截图请求数据:', JSON.stringify(data, null, 2));
 
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
@@ -376,14 +608,10 @@ class ScreenshotService {
         data: JSON.stringify(data),
         timeout: 30000,
         onload: (response) => {
-          logger.debug('[Screenshot] 附加截图响应:', response.status);
           if (response.status === 200) {
-            const result = JSON.parse(response.responseText);
-            logger.debug('[Screenshot] 截图已成功添加到Notion页面');
-            resolve(result);
+            resolve(JSON.parse(response.responseText));
           } else {
-            logger.error('[Screenshot] 附加截图失败:', response.responseText);
-            reject(new Error(`附加截图失败: ${response.status}`));
+            reject(new Error(`追加截图失败: ${response.status}`));
           }
         },
         onerror: (error) => reject(error),

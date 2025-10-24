@@ -7,16 +7,26 @@ import logger from '../utils/DebugLogger.js';
 
 const STORAGE_KEY = 'bilibili_shortcuts_config';
 
+// 检测操作系统
+const IS_MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+
 // 默认快捷键配置
+// 注意：meta 字段表示 Mac Command 键，ctrl 字段表示 Windows Ctrl 键
+// 在 matches() 方法中会自动根据操作系统进行转换
 const DEFAULT_SHORTCUTS = {
-  toggleSubtitlePanel: { key: 'b', ctrl: true, alt: false, shift: false, description: '切换字幕面板' },
-  toggleNotesPanel: { key: 'KeyL', ctrl: true, alt: false, shift: false, description: '切换笔记面板' },
-  takeScreenshot: { key: 'Slash', ctrl: false, alt: false, shift: false, doubleClick: true, description: '截图并保存到笔记' },
-  speedIncrease: { key: 'Period', ctrl: false, alt: false, shift: false, description: '增加播放速度' },
-  speedDecrease: { key: 'Comma', ctrl: false, alt: false, shift: false, description: '减少播放速度' },
-  speedReset: { key: 'Comma', ctrl: false, alt: false, shift: false, doubleClick: true, description: '重置播放速度(双击)' },
-  speedDouble: { key: 'Period', ctrl: false, alt: false, shift: false, doubleClick: true, description: '2倍速(双击)' },
+  toggleSubtitlePanel: { key: 'KeyB', meta: true, ctrl: true, alt: false, shift: false, description: '切换字幕面板' },
+  toggleNotesPanel: { key: 'Slash', meta: false, ctrl: false, alt: false, shift: true, description: '切换笔记面板' },
+  takeScreenshot: { key: 'Slash', meta: true, ctrl: true, alt: false, shift: false, description: '截图并保存到笔记' },
+  speedIncrease: { key: 'Period', meta: false, ctrl: false, alt: false, shift: false, description: '增加播放速度' },
+  speedDecrease: { key: 'Comma', meta: false, ctrl: false, alt: false, shift: false, description: '减少播放速度' },
+  speedReset: { key: 'Comma', meta: false, ctrl: false, alt: false, shift: false, doubleClick: true, description: '重置播放速度(双击)' },
+  speedDouble: { key: 'Period', meta: false, ctrl: false, alt: false, shift: false, doubleClick: true, description: '2倍速(双击)' },
 };
+
+// 快捷键说明：
+// toggleSubtitlePanel: Cmd+B (Mac) 或 Ctrl+B (Windows)
+// toggleNotesPanel: Shift+/ (所有平台)
+// takeScreenshot: Cmd+/ (Mac) 或 Ctrl+/ (Windows)
 
 class ShortcutManager {
   constructor() {
@@ -44,19 +54,20 @@ class ShortcutManager {
       
       const shortcuts = JSON.parse(saved);
       
-      // 验证并修复损坏的配置
+      // 合并默认配置（确保新增的快捷键也会显示）
+      const merged = { ...DEFAULT_SHORTCUTS };
       for (const [key, shortcut] of Object.entries(shortcuts)) {
-        if (!shortcut.key || shortcut.key === '(双击)' || shortcut.key === '') {
+        if (shortcut.key && shortcut.key !== '(双击)' && shortcut.key !== '') {
+          merged[key] = shortcut;
+        } else {
           logger.warn('ShortcutManager', `修复损坏的快捷键配置: ${key}`);
           if (DEFAULT_SHORTCUTS[key]) {
-            shortcuts[key] = { ...DEFAULT_SHORTCUTS[key] };
-          } else {
-            delete shortcuts[key];
+            merged[key] = { ...DEFAULT_SHORTCUTS[key] };
           }
         }
       }
       
-      return shortcuts;
+      return merged;
     } catch (error) {
       console.error('加载快捷键配置失败:', error);
       return { ...DEFAULT_SHORTCUTS };
@@ -111,17 +122,23 @@ class ShortcutManager {
   }
 
   /**
-   * 检查快捷键冲突
+   * 检查快捷键冲突（支持跨平台）
    */
   checkConflict(excludeName, config) {
     for (const [name, shortcut] of Object.entries(this.shortcuts)) {
       if (name === excludeName) continue;
 
-      if (shortcut.key === config.key &&
-          shortcut.ctrl === config.ctrl &&
-          shortcut.alt === config.alt &&
-          shortcut.shift === config.shift &&
-          shortcut.doubleClick === config.doubleClick) {
+      // 比较快捷键是否相同
+      const keyMatch = shortcut.key === config.key;
+      const altMatch = shortcut.alt === config.alt;
+      const shiftMatch = shortcut.shift === config.shift;
+      const doubleClickMatch = shortcut.doubleClick === config.doubleClick;
+      
+      // 比较修饰键（支持跨平台）
+      const metaMatch = (shortcut.meta || false) === (config.meta || false);
+      const ctrlMatch = (shortcut.ctrl || false) === (config.ctrl || false);
+      
+      if (keyMatch && metaMatch && ctrlMatch && altMatch && shiftMatch && doubleClickMatch) {
         return shortcut.description;
       }
     }
@@ -157,6 +174,7 @@ class ShortcutManager {
 
   /**
    * 检查事件是否匹配快捷键
+   * 支持 Mac (Command) 和 Windows (Ctrl) 跨平台
    */
   matches(event, shortcut) {
     // 处理组合键（多键同时按下）
@@ -168,11 +186,14 @@ class ShortcutManager {
       return allPressed && noModifiers;
     }
     
-    // 处理传统快捷键
-    const ctrlPressed = event.ctrlKey || event.metaKey;
+    // 处理传统快捷键（支持跨平台）
+    // Mac: 使用 meta 字段（Command 键）
+    // Windows: 使用 ctrl 字段（Ctrl 键）
+    const cmdPressed = IS_MAC ? event.metaKey : event.ctrlKey;
+    const expectedCmd = IS_MAC ? (shortcut.meta || false) : (shortcut.ctrl || false);
     
     return event.code === shortcut.key &&
-           ctrlPressed === (shortcut.ctrl || false) &&
+           cmdPressed === expectedCmd &&
            event.altKey === (shortcut.alt || false) &&
            event.shiftKey === (shortcut.shift || false);
   }
@@ -184,6 +205,7 @@ class ShortcutManager {
     if (this.isListening) return;
 
     document.addEventListener('keydown', (e) => this.handleKeyDown(e), true);
+    document.addEventListener('keyup', (e) => this.handleKeyUp(e), true);
     this.isListening = true;
   }
 
@@ -197,7 +219,27 @@ class ShortcutManager {
                         event.target.isContentEditable;
 
     for (const [name, shortcut] of Object.entries(this.shortcuts)) {
-      // 处理双击类型的快捷键
+      // 处理长按模式
+      if (shortcut.holdMode) {
+        if (event.code === shortcut.key) {
+          const handler = this.handlers.get(name);
+          if (handler) {
+            event.preventDefault();
+            handler(event);
+          }
+        }
+        continue;
+      }
+
+      // 处理双击模式
+      if (shortcut.doubleClickMode) {
+        if (event.code === shortcut.key) {
+          this.handleDoubleClick(event, name, shortcut);
+        }
+        continue;
+      }
+
+      // 处理旧的doubleClick类型的快捷键
       if (shortcut.doubleClick) {
         // 截图快捷键特殊处理
         if (name === 'takeScreenshot') {
@@ -208,7 +250,7 @@ class ShortcutManager {
       }
 
       // 全局快捷键（Ctrl/Cmd组合键）允许在任何地方触发
-      const isGlobalShortcut = shortcut.ctrl || shortcut.alt;
+      const isGlobalShortcut = shortcut.ctrl || shortcut.alt || shortcut.meta;
       
       if (this.matches(event, shortcut)) {
         // 如果是输入框且不是全局快捷键，跳过
@@ -220,6 +262,23 @@ class ShortcutManager {
         if (handler) {
           event.preventDefault();
           handler(event);
+        }
+      }
+    }
+  }
+
+  /**
+   * 处理键盘松开事件（用于长按模式）
+   */
+  handleKeyUp(event) {
+    for (const [name, shortcut] of Object.entries(this.shortcuts)) {
+      // 处理长按模式的松开
+      if (shortcut.holdMode && event.code === shortcut.key) {
+        // 调用处理器的 release 方法（如果存在）
+        const handler = this.handlers.get(name);
+        if (handler && handler.release) {
+          event.preventDefault();
+          handler.release(event);
         }
       }
     }
@@ -252,7 +311,7 @@ class ShortcutManager {
   }
 
   /**
-   * 格式化快捷键为显示文本
+   * 格式化快捷键为显示文本（支持跨平台、长按、双击）
    */
   formatShortcut(shortcut) {
     // 处理组合键
@@ -266,14 +325,40 @@ class ShortcutManager {
       return keyNames.join(' + ');
     }
     
-    // 处理传统快捷键
+    // 处理长按模式
+    if (shortcut.holdMode) {
+      let keyName = shortcut.key;
+      if (keyName === 'Period') keyName = '.';
+      if (keyName === 'Comma') keyName = ',';
+      if (keyName === 'Slash') keyName = '/';
+      if (keyName.startsWith('Key')) keyName = keyName.substring(3);
+      if (keyName.length === 1) keyName = keyName.toUpperCase();
+      return `${keyName} (长按)`;
+    }
+    
+    // 处理双击模式
+    if (shortcut.doubleClickMode) {
+      let keyName = shortcut.key;
+      if (keyName === 'Period') keyName = '.';
+      if (keyName === 'Comma') keyName = ',';
+      if (keyName === 'Slash') keyName = '/';
+      if (keyName.startsWith('Key')) keyName = keyName.substring(3);
+      if (keyName.length === 1) keyName = keyName.toUpperCase();
+      return `${keyName} (双击)`;
+    }
+    
+    // 处理传统快捷键（支持跨平台）
     const parts = [];
     
-    if (shortcut.ctrl) {
-      parts.push(navigator.platform.includes('Mac') ? 'Cmd' : 'Ctrl');
+    // 根据操作系统显示对应的修饰键
+    if (IS_MAC && shortcut.meta) {
+      parts.push('Cmd');
+    } else if (!IS_MAC && shortcut.ctrl) {
+      parts.push('Ctrl');
     }
+    
     if (shortcut.alt) {
-      parts.push('Alt');
+      parts.push(IS_MAC ? 'Option' : 'Alt');
     }
     if (shortcut.shift) {
       parts.push('Shift');

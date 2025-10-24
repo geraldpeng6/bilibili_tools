@@ -83,8 +83,10 @@ class NotesPanel {
     const panel = this.createPanel();
     const groupedNotes = this.getFilteredGroupedNotes();
     const totalNotes = notesService.getAllNotes();
-    const textCount = totalNotes.filter(n => n.type !== 'screenshot').length;
+    const textCount = totalNotes.filter(n => n.type !== 'screenshot' && n.type !== 'ai-summary').length;
+    const aiSummaryCount = totalNotes.filter(n => n.type === 'ai-summary').length;
     const screenshotCount = totalNotes.filter(n => n.type === 'screenshot').length;
+    const totalTextCount = textCount + aiSummaryCount; // 文字笔记包含AI总结
 
     const html = `
       <div class="notes-panel-content">
@@ -95,7 +97,7 @@ class NotesPanel {
         <div class="notes-filters">
           <label class="filter-checkbox">
             <input type="checkbox" id="filter-text-notes" ${this.filters.showText ? 'checked' : ''}>
-            <span>文字笔记 (${textCount})</span>
+            <span>文字笔记 (${totalTextCount})</span>
           </label>
           <label class="filter-checkbox">
             <input type="checkbox" id="filter-screenshot-notes" ${this.filters.showScreenshot ? 'checked' : ''}>
@@ -122,6 +124,9 @@ class NotesPanel {
     const filteredNotes = allNotes.filter(note => {
       if (note.type === 'screenshot') {
         return this.filters.showScreenshot;
+      } else if (note.type === 'ai-summary') {
+        // AI总结笔记在"文字笔记"筛选中显示
+        return this.filters.showText;
       } else {
         return this.filters.showText;
       }
@@ -149,7 +154,15 @@ class NotesPanel {
       })
       .map(date => ({
         date,
-        notes: groups[date]
+        notes: groups[date].sort((a, b) => {
+          // 在每个分组内，AI总结类型的笔记排在最前面
+          if (a.type === 'ai-summary' && b.type !== 'ai-summary') return -1;
+          if (a.type !== 'ai-summary' && b.type === 'ai-summary') return 1;
+          // 其他笔记按创建时间从新到旧排序
+          const timeA = a.createdAt || a.timestamp;
+          const timeB = b.createdAt || b.timestamp;
+          return timeB - timeA;
+        })
       }));
   }
 
@@ -170,11 +183,25 @@ class NotesPanel {
       `;
     } else {
       // 真的没有任何笔记
+      // 获取实际的快捷键
+      let screenshotHint = '截图';
+      try {
+        const shortcutManager = window.shortcutManager;
+        if (shortcutManager) {
+          const shortcuts = shortcutManager.getAllShortcuts();
+          if (shortcuts.takeScreenshot) {
+            screenshotHint = shortcutManager.formatShortcut(shortcuts.takeScreenshot);
+          }
+        }
+      } catch (e) {
+        // 如果获取失败，使用默认提示
+      }
+      
       return `
         <div class="notes-empty-state">
           <div class="notes-empty-icon">📝</div>
           <div>还没有保存任何笔记</div>
-          <div class="notes-empty-hint">选中文字后点击粉色点即可保存<br>或使用 Cmd+E 保存截图</div>
+          <div class="notes-empty-hint">选中文字后点击粉色钢笔即可保存<br>或使用 ${screenshotHint} 保存截图</div>
         </div>
       `;
     }
@@ -212,6 +239,11 @@ class NotesPanel {
    * @param {Object} note - 笔记对象
    */
   renderNote(note) {
+    // 处理 AI 总结类型的笔记
+    if (note.type === 'ai-summary') {
+      return this.renderAISummaryNote(note);
+    }
+
     const displayContent = note.content.length > 200 
       ? note.content.substring(0, 200) + '...' 
       : note.content;
@@ -253,6 +285,82 @@ class NotesPanel {
         <div class="note-footer">
           <div class="note-time">
             ${note.type === 'screenshot' ? '📸 ' : ''}${timeDisplay}${videoDisplay}
+          </div>
+          <div class="note-actions">
+            <button class="note-copy-btn" data-note-id="${note.id}">复制</button>
+            <button class="note-delete-btn" data-note-id="${note.id}">删除</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * 渲染 AI 总结笔记
+   * @param {Object} note - AI 总结笔记对象
+   */
+  renderAISummaryNote(note) {
+    const videoTitle = note.videoInfo?.title || note.videoBvid || '未知视频';
+    
+    // 渲染视频信息
+    const videoInfoHtml = `
+      <div class="ai-summary-section">
+        <div class="ai-summary-title">📹 视频信息</div>
+        <div class="ai-summary-content">
+          ${this.escapeHtml(videoTitle)}
+        </div>
+      </div>
+    `;
+
+    // 渲染视频总结
+    const summaryHtml = note.summary ? `
+      <div class="ai-summary-section">
+        <div class="ai-summary-title">📊 视频总结</div>
+        <div class="ai-summary-content markdown-content">
+          ${this.escapeHtml(note.summary).replace(/\n/g, '<br>')}
+        </div>
+      </div>
+    ` : '';
+
+    // 渲染时间戳段落（含嵌入的截图）
+    const segmentsHtml = note.segments && note.segments.length > 0 ? `
+      <div class="ai-summary-section">
+        <div class="ai-summary-title">⏱️ 时间戳段落</div>
+        <div class="ai-summary-segments">
+          ${note.segments.map((segment, index) => {
+            // 找到属于这个段落的截图
+            const segmentScreenshots = (note.screenshots || []).filter(s => s.segmentIndex === index);
+            
+            return `
+              <div class="segment-item">
+                <div class="segment-header">
+                  <span class="segment-time">[${segment.timestamp}]</span>
+                  <span class="segment-title">${this.escapeHtml(segment.title)}</span>
+                </div>
+                <div class="segment-summary">${this.escapeHtml(segment.summary)}</div>
+                ${segmentScreenshots.map(screenshot => `
+                  <div class="segment-screenshot">
+                    <img src="${screenshot.imageData}" alt="截图" style="max-width: 100%; border-radius: 4px; margin-top: 8px;">
+                    <div class="screenshot-time">📸 ${screenshot.timeString}</div>
+                  </div>
+                `).join('')}
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    ` : '';
+
+    return `
+      <div class="note-item note-item-ai-summary" data-note-id="${note.id}">
+        <div class="ai-summary-content-wrapper">
+          ${videoInfoHtml}
+          ${summaryHtml}
+          ${segmentsHtml}
+        </div>
+        <div class="note-footer">
+          <div class="note-time">
+            🤖 AI总结 · ${notesService.formatTime(note.createdAt || note.timestamp)}
           </div>
           <div class="note-actions">
             <button class="note-copy-btn" data-note-id="${note.id}">复制</button>

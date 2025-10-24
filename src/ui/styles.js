@@ -161,16 +161,6 @@ export const CSS_STYLES = `
     z-index: 10;
   }
 
-  /* AI助手图标 - 删除边框和背景 */
-
-  .subtitle-status-icon {
-    width: 20px;
-    height: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
   .subtitle-status-text {
     font-size: 13px;
     font-weight: 500;
@@ -1626,8 +1616,8 @@ export const CSS_STYLES = `
 
   .shortcut-item {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
+    gap: 8px;
     padding: 12px;
     background: rgba(255, 255, 255, 0.05);
     border-radius: 8px;
@@ -1695,6 +1685,31 @@ export const CSS_STYLES = `
   .shortcut-reset-btn:hover {
     background: rgba(255, 255, 255, 0.15);
     color: rgba(255, 255, 255, 0.9);
+  }
+
+  /* 长按和双击模式按钮 */
+  .shortcut-mode-btn {
+    padding: 4px 8px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+
+  .shortcut-mode-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .shortcut-mode-btn.active {
+    background: rgba(254, 235, 234, 0.3);
+    color: #feebea;
+    border-color: #feebea;
+    box-shadow: 0 0 8px rgba(254, 235, 234, 0.3);
   }
 
   .shortcut-config-footer {
@@ -1993,6 +2008,114 @@ export const CSS_STYLES = `
 
   .note-delete-btn:hover {
     color: #c0392b;
+  }
+
+  /* ==================== AI 总结笔记样式 ==================== */
+  .note-item-ai-summary {
+    background: rgba(254, 235, 234, 0.08);
+    border: 1px solid rgba(254, 235, 234, 0.2);
+    padding: 16px;
+  }
+
+  .note-item-ai-summary:hover {
+    background: rgba(254, 235, 234, 0.12);
+    border-color: rgba(254, 235, 234, 0.4);
+  }
+
+  .ai-summary-content-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+
+  .ai-summary-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .ai-summary-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #feebea;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .ai-summary-content {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.8);
+    line-height: 1.6;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    border-left: 3px solid rgba(254, 235, 234, 0.3);
+  }
+
+  .ai-summary-segments {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .segment-item {
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 4px;
+    border: 1px solid rgba(254, 235, 234, 0.1);
+    transition: all 0.2s;
+  }
+
+  .segment-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(254, 235, 234, 0.2);
+  }
+
+  .segment-header {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    align-items: center;
+  }
+
+  .segment-time {
+    font-size: 12px;
+    font-weight: 600;
+    color: #feebea;
+    flex-shrink: 0;
+  }
+
+  .segment-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    flex: 1;
+  }
+
+  .segment-summary {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+    line-height: 1.5;
+    margin-bottom: 8px;
+  }
+
+  .segment-screenshot {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(254, 235, 234, 0.1);
+  }
+
+  .segment-screenshot img {
+    max-width: 100%;
+    border-radius: 4px;
+    display: block;
+  }
+
+  .screenshot-time {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-top: 4px;
   }
 
   /* ==================== 笔记选择保存点样式 ==================== */
@@ -2640,19 +2763,6 @@ export const ICONS = {
     <path d="M3 21L12 12L12.2 6.2L11 5M15 4V2M15 16V14M8 9H10M20 9H22M17.8 11.8L19 13M17.8 6.2L19 5" stroke="#feebea" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
     <circle cx="12" cy="12" r="1.5" fill="#feebea"/>
     <path d="M17 7L12 12L7 7" stroke="#feebea" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
-  </svg>`,
-  
-  AI_ASSISTANT: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <g opacity="0.8">
-      <circle cx="12" cy="15" r="6" fill="#feebea" opacity="0.3"/>
-      <path d="M12 5C7.5 5 4 8 4 12c0 3.5 2.5 6.5 6 7.5" stroke="#feebea" stroke-width="1.5" stroke-linecap="round"/>
-      <path d="M12 5C16.5 5 20 8 20 12c0 3.5-2.5 6.5-6 7.5" stroke="#feebea" stroke-width="1.5" stroke-linecap="round"/>
-      <circle cx="8" cy="10" r="1" fill="#feebea"/>
-      <circle cx="16" cy="10" r="1" fill="#feebea"/>
-      <path d="M8 14c1 1 2 1.5 4 1.5s3-0.5 4-1.5" stroke="#feebea" stroke-width="1.5" stroke-linecap="round"/>
-      <path d="M7 3L9 5" stroke="#feebea" stroke-width="1.5" stroke-linecap="round"/>
-      <path d="M17 3L15 5" stroke="#feebea" stroke-width="1.5" stroke-linecap="round"/>
-    </g>
   </svg>`,
   
   DOWNLOAD: `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
