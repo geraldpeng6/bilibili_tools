@@ -210,6 +210,15 @@ class ConfigManager {
   }
 
   /**
+   * 检查Notion是否已配置
+   * @returns {boolean}
+   */
+  isNotionConfigured() {
+    const config = this.getNotionConfig();
+    return !!(config.apiKey && config.parentPageId);
+  }
+
+  /**
    * 保存Notion配置
    * @param {Object} config
    * @returns {{success: boolean, error: string|null}}
@@ -255,6 +264,38 @@ class ConfigManager {
    */
   setNotionAutoSendEnabled(enabled) {
     GM_setValue(STORAGE_KEYS.NOTION_AUTO_SEND, enabled);
+  }
+
+  /**
+   * 获取Notion内容选项配置
+   * @returns {{videoInfo: boolean, summary: boolean, segments: boolean, subtitles: boolean}}
+   */
+  getNotionContentOptions() {
+    return {
+      videoInfo: GM_getValue(STORAGE_KEYS.NOTION_CONTENT_VIDEO_INFO, true),
+      summary: GM_getValue(STORAGE_KEYS.NOTION_CONTENT_SUMMARY, true),
+      segments: GM_getValue(STORAGE_KEYS.NOTION_CONTENT_SEGMENTS, true),
+      subtitles: GM_getValue(STORAGE_KEYS.NOTION_CONTENT_SUBTITLES, true)
+    };
+  }
+
+  /**
+   * 保存Notion内容选项配置
+   * @param {Object} options
+   */
+  saveNotionContentOptions(options) {
+    if (options.videoInfo !== undefined) {
+      GM_setValue(STORAGE_KEYS.NOTION_CONTENT_VIDEO_INFO, options.videoInfo);
+    }
+    if (options.summary !== undefined) {
+      GM_setValue(STORAGE_KEYS.NOTION_CONTENT_SUMMARY, options.summary);
+    }
+    if (options.segments !== undefined) {
+      GM_setValue(STORAGE_KEYS.NOTION_CONTENT_SEGMENTS, options.segments);
+    }
+    if (options.subtitles !== undefined) {
+      GM_setValue(STORAGE_KEYS.NOTION_CONTENT_SUBTITLES, options.subtitles);
+    }
   }
 
   /**

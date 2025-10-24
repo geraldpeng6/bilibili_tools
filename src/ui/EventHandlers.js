@@ -836,9 +836,17 @@ class EventHandlers {
     if (!modal) return;
 
     const notionConfig = config.getNotionConfig();
+    const contentOptions = config.getNotionContentOptions();
+    
     document.getElementById('notion-api-key').value = notionConfig.apiKey;
     document.getElementById('notion-parent-page-id').value = notionConfig.parentPageId;
     document.getElementById('notion-auto-send-enabled').checked = config.getNotionAutoSendEnabled();
+    
+    // 加载内容选项
+    document.getElementById('notion-content-video-info').checked = contentOptions.videoInfo;
+    document.getElementById('notion-content-summary').checked = contentOptions.summary;
+    document.getElementById('notion-content-segments').checked = contentOptions.segments;
+    document.getElementById('notion-content-subtitles').checked = contentOptions.subtitles;
     
     const statusEl = document.getElementById('notion-status-message');
     if (statusEl) statusEl.innerHTML = '';
@@ -991,6 +999,51 @@ class EventHandlers {
         }
       });
     }
+
+    // 长按和双击模式按钮
+    const modeButtons = modal.querySelectorAll('.shortcut-mode-btn');
+    modeButtons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const key = btn.dataset.key;
+        const mode = btn.dataset.mode; // 'hold' 或 'double'
+        const shortcut = shortcutManager.getAllShortcuts()[key];
+        
+        if (!shortcut) return;
+
+        // 获取同一行的两个按钮
+        const item = btn.closest('.shortcut-item');
+        const holdBtn = item.querySelector('.shortcut-hold-btn');
+        const doubleBtn = item.querySelector('.shortcut-double-btn');
+
+        // 切换模式（互斥关系）
+        if (mode === 'hold') {
+          const isActive = btn.classList.contains('active');
+          holdBtn.classList.toggle('active');
+          doubleBtn.classList.remove('active');
+          
+          // 更新快捷键配置
+          const newConfig = {
+            ...shortcut,
+            holdMode: !isActive,
+            doubleClickMode: false
+          };
+          shortcutManager.updateShortcut(key, newConfig);
+        } else if (mode === 'double') {
+          const isActive = btn.classList.contains('active');
+          doubleBtn.classList.toggle('active');
+          holdBtn.classList.remove('active');
+          
+          // 更新快捷键配置
+          const newConfig = {
+            ...shortcut,
+            holdMode: false,
+            doubleClickMode: !isActive
+          };
+          shortcutManager.updateShortcut(key, newConfig);
+        }
+      });
+    });
   }
 
   /**
@@ -999,11 +1052,27 @@ class EventHandlers {
    */
   startShortcutCapture(input) {
     const shortcutKey = input.dataset.key;
+    const shortcut = shortcutManager.getAllShortcuts()[shortcutKey];
+    
     input.classList.add('recording');
-    input.value = '按下快捷键...';
+    
+    // 检查是否选择了长按或双击模式
+    const item = input.closest('.shortcut-item');
+    const holdBtn = item?.querySelector('.shortcut-hold-btn');
+    const doubleBtn = item?.querySelector('.shortcut-double-btn');
+    const isHoldMode = holdBtn?.classList.contains('active');
+    const isDoubleMode = doubleBtn?.classList.contains('active');
+
+    if (isHoldMode || isDoubleMode) {
+      input.value = '按下任意键...';
+    } else {
+      input.value = '按下快捷键...';
+    }
 
     let doubleClickTimer = null;
     let lastKeyCode = '';
+
+    const IS_MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
     const handleKeydown = (event) => {
       event.preventDefault();
@@ -1012,44 +1081,84 @@ class EventHandlers {
       // ESC取消
       if (event.key === 'Escape') {
         input.classList.remove('recording');
-        input.value = shortcutManager.formatShortcut(shortcutManager.getAllShortcuts()[shortcutKey]);
+        input.value = shortcutManager.formatShortcut(shortcut);
         document.removeEventListener('keydown', handleKeydown);
         return;
       }
 
-      // 检测双击
-      if (shortcutKey === 'takeScreenshot' && event.code === 'Slash') {
-        if (lastKeyCode === 'Slash' && doubleClickTimer) {
-          clearTimeout(doubleClickTimer);
-          const newConfig = {
-            key: 'Slash',
-            ctrl: false,
-            alt: false,
-            shift: false,
-            doubleClick: true
-          };
-          
-          const result = shortcutManager.updateShortcut(shortcutKey, newConfig);
-          if (result.success) {
-            input.value = shortcutManager.formatShortcut(newConfig);
-            notification.success('快捷键已更新');
-          }
-          input.classList.remove('recording');
-          document.removeEventListener('keydown', handleKeydown);
+      // 如果是长按或双击模式，只需要单个按键
+      if (isHoldMode || isDoubleMode) {
+        // 直接保存单个按键
+        const newConfig = {
+          key: event.code || event.key,
+          meta: false,
+          ctrl: false,
+          alt: false,
+          shift: false,
+          holdMode: isHoldMode,
+          doubleClickMode: isDoubleMode
+        };
+
+        const result = shortcutManager.updateShortcut(shortcutKey, newConfig);
+        if (result.success) {
+          input.value = shortcutManager.formatShortcut(newConfig);
+          notification.success('快捷键已更新');
         } else {
-          lastKeyCode = 'Slash';
-          doubleClickTimer = setTimeout(() => {
-            doubleClickTimer = null;
-            lastKeyCode = '';
-          }, 300);
+          notification.error(result.error);
+          input.value = shortcutManager.formatShortcut(shortcut);
         }
+
+        input.classList.remove('recording');
+        document.removeEventListener('keydown', handleKeydown);
         return;
       }
 
-      // 其他普通快捷键
+      // 检测修饰键（Command/Ctrl/Alt/Shift）- 仅当按下修饰键时显示提示
+      const isModifierOnly = ['Meta', 'Control', 'Alt', 'Shift'].includes(event.key);
+      
+      if (isModifierOnly) {
+        // 修饰键被按下，等待字符键
+        input.value = '继续按下字符键...';
+        return;
+      }
+
+      // 检测双击（仅针对不需要修饰键的快捷键）
+      if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+        if (shortcutKey === 'takeScreenshot' && event.code === 'Slash') {
+          if (lastKeyCode === 'Slash' && doubleClickTimer) {
+            clearTimeout(doubleClickTimer);
+            const newConfig = {
+              key: 'Slash',
+              meta: false,
+              ctrl: false,
+              alt: false,
+              shift: false,
+              doubleClick: true
+            };
+            
+            const result = shortcutManager.updateShortcut(shortcutKey, newConfig);
+            if (result.success) {
+              input.value = shortcutManager.formatShortcut(newConfig);
+              notification.success('快捷键已更新');
+            }
+            input.classList.remove('recording');
+            document.removeEventListener('keydown', handleKeydown);
+          } else {
+            lastKeyCode = 'Slash';
+            doubleClickTimer = setTimeout(() => {
+              doubleClickTimer = null;
+              lastKeyCode = '';
+            }, 300);
+          }
+          return;
+        }
+      }
+
+      // 构建快捷键配置（支持跨平台）
       const newConfig = {
         key: event.code || event.key,
-        ctrl: event.ctrlKey || event.metaKey,
+        meta: event.metaKey,        // Mac Command 键
+        ctrl: event.ctrlKey,        // Windows Ctrl 键
         alt: event.altKey,
         shift: event.shiftKey,
         doubleClick: false
@@ -1059,7 +1168,7 @@ class EventHandlers {
       const conflict = shortcutManager.checkConflict(shortcutKey, newConfig);
       if (conflict) {
         notification.warning(`与"${conflict}"冲突，请重新设置`);
-        input.value = shortcutManager.formatShortcut(shortcutManager.getAllShortcuts()[shortcutKey]);
+        input.value = shortcutManager.formatShortcut(shortcut);
       } else {
         const result = shortcutManager.updateShortcut(shortcutKey, newConfig);
         if (result.success) {
@@ -1067,7 +1176,7 @@ class EventHandlers {
           notification.success('快捷键已更新');
         } else {
           notification.error(result.error);
-          input.value = shortcutManager.formatShortcut(shortcutManager.getAllShortcuts()[shortcutKey]);
+          input.value = shortcutManager.formatShortcut(shortcut);
         }
       }
 
@@ -1651,6 +1760,14 @@ class EventHandlers {
       const apiKey = document.getElementById('notion-api-key').value.trim();
       const parentPageId = document.getElementById('notion-parent-page-id').value.trim();
       const autoSendEnabled = document.getElementById('notion-auto-send-enabled').checked;
+      
+      // 获取内容选项
+      const contentOptions = {
+        videoInfo: document.getElementById('notion-content-video-info').checked,
+        summary: document.getElementById('notion-content-summary').checked,
+        segments: document.getElementById('notion-content-segments').checked,
+        subtitles: document.getElementById('notion-content-subtitles').checked
+      };
 
       if (!apiKey) {
         uiRenderer.showNotionStatus('请输入 API Key', true);
@@ -1665,6 +1782,7 @@ class EventHandlers {
       const result = config.saveNotionConfig({ apiKey, parentPageId });
       if (result.success) {
         config.setNotionAutoSendEnabled(autoSendEnabled);
+        config.saveNotionContentOptions(contentOptions);
         uiRenderer.showNotionStatus('配置已保存');
         setTimeout(() => {
           this.hideNotionConfigModal();

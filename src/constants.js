@@ -72,11 +72,10 @@ export const EVENTS = {
 const DEFAULT_PROMPT_1 = `请用中文总结以下视频字幕内容，使用Markdown格式输出。
 
 要求：
-1. 在开头提供TL;DR的核心摘要
+1. 在开头提供TL;DR（不超过50字的核心摘要）
 2. 使用标题、列表等Markdown格式组织内容
 3. 突出关键信息和要点
-4. 分段落说明每一部分的内容
-5. 不要在总结中包含任何时间戳
+4. 总结的整体结构要组织良好
 
 字幕内容：
 `;
@@ -214,6 +213,12 @@ export const STORAGE_KEYS = {
   NOTION_PARENT_PAGE_ID: 'notion_parent_page_id',
   NOTION_DATABASE_ID: 'notion_database_id',
   NOTION_AUTO_SEND: 'notion_auto_send_enabled',
+  
+  // Notion内容选项
+  NOTION_CONTENT_VIDEO_INFO: 'notion_content_video_info',
+  NOTION_CONTENT_SUMMARY: 'notion_content_summary',
+  NOTION_CONTENT_SEGMENTS: 'notion_content_segments',
+  NOTION_CONTENT_SUBTITLES: 'notion_content_subtitles',
 };
 
 // ==================== Z-Index层级 ====================

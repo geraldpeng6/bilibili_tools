@@ -190,7 +190,7 @@ class SpeedControlService {
 
 
   /**
-   * 绑定键盘事件
+   * 绑定键盘事件（仅保留 Option 键的硬编码，其他通过快捷键系统）
    */
   bindKeyboardEvents() {
     document.addEventListener('keydown', (event) => this.handleKeyDown(event), true);
@@ -198,10 +198,10 @@ class SpeedControlService {
   }
 
   /**
-   * 键盘按下事件处理
+   * 键盘按下事件处理（仅处理 Option 键长按加速）
    */
   handleKeyDown(event) {
-    // 检测右侧Option键
+    // 检测右侧Option键（长按加速）
     if (event.code === 'AltRight' && event.location === 2) {
       if (!this.state.isRightOptionPressed) {
         this.state.isRightOptionPressed = true;
@@ -222,41 +222,10 @@ class SpeedControlService {
       }
       return;
     }
-
-    // 忽略在输入框中的按键
-    if (event.target.tagName === 'INPUT' || 
-        event.target.tagName === 'TEXTAREA' || 
-        event.target.isContentEditable) {
-      return;
-    }
-
-    // 检测句号键 (.)
-    if (event.code === 'Period') {
-      event.preventDefault();
-      
-      if (this.detectDoubleClick('period')) {
-        this.setToDoubleSpeed();
-      } else {
-        this.adjustBaseSpeed(SPEED_CONFIG.speedStep);
-      }
-      return;
-    }
-
-    // 检测逗号键 (,)
-    if (event.code === 'Comma') {
-      event.preventDefault();
-      
-      if (this.detectDoubleClick('comma')) {
-        this.resetToNormalSpeed();
-      } else {
-        this.adjustBaseSpeed(-SPEED_CONFIG.speedStep);
-      }
-      return;
-    }
   }
 
   /**
-   * 键盘释放事件处理
+   * 键盘释放事件处理（仅处理 Option 键松开）
    */
   handleKeyUp(event) {
     if (event.code === 'AltRight' && event.location === 2) {
@@ -271,7 +240,6 @@ class SpeedControlService {
       }
       return;
     }
-
   }
 
   /**

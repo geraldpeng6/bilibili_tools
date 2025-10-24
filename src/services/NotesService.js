@@ -202,6 +202,112 @@ class NotesService {
   }
 
   /**
+   * 添加AI总结到笔记
+   * @param {Object} summaryData - 总结数据 {summary, segments, videoInfo}
+   * @returns {Object} 创建的笔记对象
+   */
+  addAISummary(summaryData) {
+    try {
+      const note = {
+        id: Date.now() + Math.random().toString(36).substr(2, 9),
+        type: 'ai-summary',
+        createdAt: Date.now(),
+        timestamp: Date.now(),
+        summary: summaryData.summary || '', // Markdown格式的总结
+        segments: summaryData.segments || [], // 时间戳段落数组
+        videoInfo: summaryData.videoInfo || {}, // 视频信息
+        videoBvid: summaryData.videoBvid || ''
+      };
+
+      let notes = this.getAllNotes();
+      notes.unshift(note);
+      this.saveNotes(notes);
+
+      logger.info('NotesService', `✓ AI总结已保存`);
+      return note;
+    } catch (error) {
+      logger.error('NotesService', '✗ 添加AI总结失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 更新笔记中的截图（按时间戳插入到对应段落）
+   * @param {string} noteId - 笔记ID
+   * @param {Object} screenshot - 截图数据 {imageData, timeString, videoTimestamp}
+   */
+  addScreenshotToSummary(noteId, screenshot) {
+    try {
+      const notes = this.getAllNotes();
+      const noteIndex = notes.findIndex(n => n.id === noteId);
+      
+      if (noteIndex === -1) {
+        throw new Error('笔记不存在');
+      }
+
+      const note = notes[noteIndex];
+      if (note.type !== 'ai-summary' || !note.segments) {
+        throw new Error('笔记不是AI总结类型或没有时间戳段落');
+      }
+
+      // 初始化截图数组
+      if (!note.screenshots) {
+        note.screenshots = [];
+      }
+
+      // 找到最接近的后续时间戳段落
+      const screenshotTime = screenshot.videoTimestamp; // 秒数
+      let targetSegmentIndex = -1;
+
+      for (let i = 0; i < note.segments.length; i++) {
+        const segment = note.segments[i];
+        const segmentTime = this.parseTimestamp(segment.timestamp); // 转换为秒数
+
+        if (segmentTime > screenshotTime) {
+          targetSegmentIndex = i;
+          break;
+        }
+      }
+
+      // 如果没有找到后续段落，添加到最后
+      if (targetSegmentIndex === -1) {
+        targetSegmentIndex = note.segments.length;
+      }
+
+      // 在目标位置前添加截图
+      note.screenshots.push({
+        ...screenshot,
+        segmentIndex: targetSegmentIndex,
+        addedAt: Date.now()
+      });
+
+      this.saveNotes(notes);
+      logger.info('NotesService', `✓ 截图已添加到总结笔记`);
+      return note;
+    } catch (error) {
+      logger.error('NotesService', '✗ 添加截图到总结失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 解析时间戳字符串为秒数
+   * @param {string} timestamp - 时间戳字符串 (MM:SS 或 HH:MM:SS)
+   * @returns {number} 秒数
+   */
+  parseTimestamp(timestamp) {
+    const parts = timestamp.split(':').map(p => parseInt(p, 10));
+    if (parts.length === 2) {
+      // MM:SS
+      return parts[0] * 60 + parts[1];
+    } else if (parts.length === 3) {
+      // HH:MM:SS
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+    return 0;
+  }
+
+  /**
    * 删除指定笔记
    * @param {string} noteId - 笔记ID
    */
