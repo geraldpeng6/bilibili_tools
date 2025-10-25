@@ -136,7 +136,7 @@ export class RequestFactory {
         'origin': 'userscript-bilibili-sponsor-skip',
         'x-ext-version': '1.0.0'
       },
-      timeout: 5000,
+      timeout: 10000, // 增加超时时间到10秒
       validateStatus: (status) => status === 200 || status === 404,
       parseJson: true,
       retry: true

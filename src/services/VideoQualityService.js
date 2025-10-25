@@ -311,7 +311,7 @@ class VideoQualityService {
       GM_xmlhttpRequest({
         method: "GET",
         url: `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`,
-        timeout: 5000,
+        timeout: 10000, // 增加超时时间到10秒
         onload: (res) => {
           try {
             const data = JSON.parse(res.responseText);

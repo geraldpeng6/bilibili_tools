@@ -133,6 +133,12 @@ class EventHandlers {
       aiIcon.addEventListener('click', async (e) => {
         e.stopPropagation();
         
+        // 检查是否正在生成中
+        if (state.ai.isSummarizing) {
+          notification.warning('AI总结正在生成中，请稍候...');
+          return;
+        }
+        
         const subtitleData = state.getSubtitleData();
         if (!subtitleData || subtitleData.length === 0) {
           notification.error('没有可用的字幕数据');
@@ -146,8 +152,32 @@ class EventHandlers {
           return;
         }
         
+        // 检查是否已有总结
+        const videoKey = state.getVideoKey();
+        const existingSummary = state.getAISummary(videoKey);
+        
+        if (existingSummary) {
+          // 如果已有总结，询问是否重新生成
+          const confirmRegenerate = confirm('已存在AI总结，是否重新生成？\n\n点击"确定"重新生成\n点击"取消"查看现有总结');
+          
+          if (!confirmRegenerate) {
+            // 用户选择查看现有总结，切换到总结标签页
+            const summaryTab = container?.querySelector('.subtitle-tab[data-tab="summary"]');
+            if (summaryTab) {
+              summaryTab.click();
+            }
+            return;
+          }
+          
+          // 用户确认重新生成，清除缓存的总结
+          if (videoKey) {
+            sessionStorage.removeItem(`ai-summary-${videoKey}`);
+          }
+          state.ai.currentSummary = null;
+        }
+        
         try {
-          // 直接触发AI总结（会同时生成markdown总结和JSON段落）
+          // 触发AI总结（会同时生成markdown总结和JSON段落）
           await aiService.summarize(subtitleData, false);
           
           // 自动切换到总结标签页
@@ -198,13 +228,23 @@ class EventHandlers {
     if (notionIcon) {
       notionIcon.addEventListener('click', async (e) => {
         e.stopPropagation();
+        
+        // 检查AI总结是否正在生成中
+        if (state.ai.isSummarizing) {
+          notification.warning('AI总结正在生成中，请稍后再发送到Notion');
+          return;
+        }
+        
         const subtitleData = state.getSubtitleData();
-        if (subtitleData) {
-          try {
-            await notionService.sendSubtitle(subtitleData, false);
-          } catch (error) {
-            notification.handleError(error, 'Notion发送');
-          }
+        if (!subtitleData) {
+          notification.error('没有可用的字幕数据');
+          return;
+        }
+        
+        try {
+          await notionService.sendSubtitle(subtitleData, false);
+        } catch (error) {
+          notification.handleError(error, 'Notion发送');
         }
       });
     }
@@ -294,7 +334,7 @@ class EventHandlers {
               video.currentTime = timeInSeconds;
               
               const displayTime = timeStr.replace(/[\[\]]/g, '');
-              notification.show(`跳转到 ${displayTime}`, 'info');
+              notification.info(`跳转到 ${displayTime}`);
               
               // 添加点击动画
               sectionItem.classList.add('clicked');

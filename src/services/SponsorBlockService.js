@@ -43,7 +43,7 @@ class SponsorBlockAPI {
           "origin": "userscript-bilibili-sponsor-skip",
           "x-ext-version": "1.0.0"
         },
-        timeout: 5000,
+        timeout: 10000, // 增加超时时间到10秒
         onload: (response) => {
           try {
             if (response.status === 404) {
@@ -73,9 +73,16 @@ class SponsorBlockAPI {
     });
 
     this.pendingRequests.set(bvid, promise);
-    promise.finally(() => {
-      this.pendingRequests.delete(bvid);
-    });
+    
+    // 确保清理 pending 请求，并捕获所有错误
+    promise
+      .catch(error => {
+        logger.debug('SponsorBlockAPI', `获取视频 ${bvid} 片段失败:`, error.message);
+        return []; // 返回空数组作为降级处理
+      })
+      .finally(() => {
+        this.pendingRequests.delete(bvid);
+      });
 
     return promise;
   }
