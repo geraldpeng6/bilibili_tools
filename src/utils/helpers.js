@@ -17,6 +17,20 @@ export function formatTime(seconds) {
 }
 
 /**
+ * 格式化文件大小
+ * @param {number} bytes - 字节数
+ * @param {number} decimals - 小数位数
+ * @returns {string}
+ */
+export function formatFileSize(bytes, decimals = 2) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + ' ' + sizes[i];
+}
+
+/**
  * 从URL中提取BV号
  * @param {string} url - URL字符串
  * @returns {string|null} - BV号或null
@@ -35,29 +49,67 @@ export function extractBvidFromUrl(url = window.location.href) {
 
 /**
  * 获取视频信息
- * @returns {{bvid: string|null, cid: string|number|null, aid: string|number|null}}
+ * @returns {{bvid: string|null, cid: string|number|null, aid: string|number|null, videoId: string|null, platform: string}}
  */
 export function getVideoInfo() {
-  let bvid = null;
-  let cid = null;
-  let aid = null;
-
-  // 从URL提取BV号
-  bvid = extractBvidFromUrl();
-
-  // 尝试从页面数据中获取CID和AID
-  try {
-    const initialState = unsafeWindow.__INITIAL_STATE__;
-    if (initialState && initialState.videoData) {
-      bvid = bvid || initialState.videoData.bvid;
-      cid = initialState.videoData.cid || initialState.videoData.pages?.[0]?.cid;
-      aid = initialState.videoData.aid;
-    }
-  } catch (e) {
-    // Silently ignore
+  const hostname = location.hostname;
+  
+  // YouTube支持
+  if (hostname.includes('youtube.com')) {
+    const urlParams = new URLSearchParams(window.location.search);
+    const videoId = urlParams.get('v');
+    return {
+      videoId,
+      platform: 'youtube',
+      bvid: null,
+      cid: null,
+      aid: null
+    };
   }
+  
+  // B站支持
+  if (hostname.includes('bilibili.com')) {
+    let bvid = null;
+    let cid = null;
+    let aid = null;
 
-  return { bvid, cid, aid };
+    // 从URL提取BV号
+    bvid = extractBvidFromUrl();
+
+    // 尝试从页面数据中获取CID和AID
+    try {
+      const initialState = unsafeWindow.__INITIAL_STATE__;
+      if (initialState && initialState.videoData) {
+        bvid = bvid || initialState.videoData.bvid;
+        cid = initialState.videoData.cid || initialState.videoData.pages?.[0]?.cid;
+        aid = initialState.videoData.aid;
+      }
+    } catch (e) {
+      // Silently ignore
+    }
+
+    return { bvid, cid, aid, videoId: bvid, platform: 'bilibili' };
+  }
+  
+  // 通用视频网站（尝试从meta标签获取）
+  let videoId = null;
+  
+  // 尝试从各种meta标签获取视频ID
+  const ogUrl = document.querySelector('meta[property="og:url"]');
+  if (ogUrl) {
+    const urlPath = ogUrl.content;
+    // 提取路径中最后一个segment作为ID
+    const segments = urlPath.split('/').filter(s => s);
+    videoId = segments[segments.length - 1];
+  }
+  
+  return { 
+    bvid: null, 
+    cid: null, 
+    aid: null,
+    videoId,
+    platform: 'unknown'
+  };
 }
 
 /**
@@ -65,32 +117,86 @@ export function getVideoInfo() {
  * @returns {string} - 视频标题
  */
 export function getVideoTitle() {
+  const hostname = location.hostname;
   let title = '';
   
-  // 方法1: 从__INITIAL_STATE__获取
-  try {
-    const initialState = unsafeWindow.__INITIAL_STATE__;
-    if (initialState && initialState.videoData && initialState.videoData.title) {
-      title = initialState.videoData.title;
+  // YouTube支持
+  if (hostname.includes('youtube.com')) {
+    // 方法1: 从视频标题元素获取
+    const titleElement = document.querySelector('h1.ytd-video-primary-info-renderer yt-formatted-string') ||
+                        document.querySelector('h1 yt-formatted-string.style-scope.ytd-watch-metadata') ||
+                        document.querySelector('#title h1') ||
+                        document.querySelector('h1.title');
+    if (titleElement) {
+      title = titleElement.textContent.trim();
     }
-  } catch (e) {
-    // Silently ignore
+    
+    // 方法2: 从meta标签获取
+    if (!title) {
+      const metaTitle = document.querySelector('meta[property="og:title"]') ||
+                       document.querySelector('meta[name="title"]');
+      if (metaTitle) {
+        title = metaTitle.content;
+      }
+    }
+    
+    // 方法3: 从document.title提取
+    if (!title) {
+      title = document.title.replace(' - YouTube', '').trim();
+    }
+    
+    return title || '未知视频';
   }
+  
+  // B站支持
+  if (hostname.includes('bilibili.com')) {
+    // 方法1: 从__INITIAL_STATE__获取
+    try {
+      const initialState = unsafeWindow.__INITIAL_STATE__;
+      if (initialState && initialState.videoData && initialState.videoData.title) {
+        title = initialState.videoData.title;
+      }
+    } catch (e) {
+      // Silently ignore
+    }
 
+    // 方法2: 从h1标签获取
+    if (!title) {
+      const h1 = document.querySelector(SELECTORS.VIDEO_TITLE_H1);
+      if (h1) {
+        title = h1.textContent.trim();
+      }
+    }
+
+    // 方法3: 从document.title提取
+    if (!title) {
+      title = document.title
+        .replace(/_哔哩哔哩.*$/, '')
+        .replace(/_bilibili.*$/i, '')
+        .trim();
+    }
+    
+    return title || '未知视频';
+  }
+  
+  // 通用网站支持
+  // 方法1: 从og:title获取
+  const ogTitle = document.querySelector('meta[property="og:title"]');
+  if (ogTitle) {
+    title = ogTitle.content;
+  }
+  
   // 方法2: 从h1标签获取
   if (!title) {
-    const h1 = document.querySelector(SELECTORS.VIDEO_TITLE_H1);
+    const h1 = document.querySelector('h1');
     if (h1) {
       title = h1.textContent.trim();
     }
   }
-
-  // 方法3: 从document.title提取
+  
+  // 方法3: 从document.title获取
   if (!title) {
-    title = document.title
-      .replace(/_哔哩哔哩.*$/, '')
-      .replace(/_bilibili.*$/i, '')
-      .trim();
+    title = document.title;
   }
 
   return title || '未知视频';
@@ -101,13 +207,57 @@ export function getVideoTitle() {
  * @returns {string} - 创作者名称
  */
 export function getVideoCreator() {
-  try {
-    const initialState = unsafeWindow.__INITIAL_STATE__;
-    if (initialState && initialState.videoData && initialState.videoData.owner) {
-      return initialState.videoData.owner.name;
+  const hostname = location.hostname;
+  
+  // YouTube支持
+  if (hostname.includes('youtube.com')) {
+    // 方法1: 从频道名称元素获取
+    const channelElement = document.querySelector('#owner #channel-name a') ||
+                          document.querySelector('#upload-info #channel-name a') ||
+                          document.querySelector('ytd-channel-name a') ||
+                          document.querySelector('.ytd-channel-name a') ||
+                          document.querySelector('#owner-name a');
+    if (channelElement) {
+      return channelElement.textContent.trim();
     }
-  } catch (e) {
-    // Silently ignore
+    
+    // 方法2: 从meta标签获取
+    const authorMeta = document.querySelector('link[itemprop="name"]');
+    if (authorMeta) {
+      return authorMeta.content;
+    }
+    
+    return '未知';
+  }
+  
+  // B站支持
+  if (hostname.includes('bilibili.com')) {
+    try {
+      const initialState = unsafeWindow.__INITIAL_STATE__;
+      if (initialState && initialState.videoData && initialState.videoData.owner) {
+        return initialState.videoData.owner.name;
+      }
+    } catch (e) {
+      // Silently ignore
+    }
+    
+    // 备用方法：从页面元素获取
+    const uploaderElement = document.querySelector('.up-name') ||
+                           document.querySelector('.up-info__name') ||
+                           document.querySelector('.up-detail-name');
+    if (uploaderElement) {
+      return uploaderElement.textContent.trim();
+    }
+    
+    return '未知';
+  }
+  
+  // 通用网站支持
+  // 从meta标签获取
+  const authorMeta = document.querySelector('meta[name="author"]') ||
+                     document.querySelector('meta[property="article:author"]');
+  if (authorMeta) {
+    return authorMeta.content;
   }
   
   return '未知';
@@ -384,3 +534,58 @@ export function createDOMPool(tagName, initialSize = 10) {
   };
 }
 
+/**
+ * 获取当前页面的视频元素
+ * @returns {HTMLVideoElement|null}
+ */
+export function getVideoElement() {
+  const hostname = location.hostname;
+  
+  // YouTube
+  if (hostname.includes('youtube.com')) {
+    return document.querySelector('video.html5-main-video') || 
+           document.querySelector('video.video-stream') ||
+           document.querySelector('video');
+  }
+  
+  // B站
+  if (hostname.includes('bilibili.com')) {
+    return document.querySelector('.bpx-player-video-wrap video') ||
+           document.querySelector('video');
+  }
+  
+  // Vimeo
+  if (hostname.includes('vimeo.com')) {
+    return document.querySelector('.vp-video video') ||
+           document.querySelector('video');
+  }
+  
+  // 通用查找
+  return document.querySelector('video');
+}
+
+/**
+ * 检测当前页面是否有视频
+ * @returns {boolean}
+ */
+export function hasVideo() {
+  return getVideoElement() !== null;
+}
+
+/**
+ * 获取视频时长
+ * @returns {number|null} - 视频时长（秒）
+ */
+export function getVideoDuration() {
+  const video = getVideoElement();
+  return video && !isNaN(video.duration) ? video.duration : null;
+}
+
+/**
+ * 获取当前播放时间
+ * @returns {number|null} - 当前时间（秒）
+ */
+export function getCurrentTime() {
+  const video = getVideoElement();
+  return video && !isNaN(video.currentTime) ? video.currentTime : null;
+}

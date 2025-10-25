@@ -5,6 +5,7 @@
 
 import state from '../state/StateManager.js';
 import logger from '../utils/DebugLogger.js';
+import LogDecorator from '../utils/LogDecorator.js';
 import eventBus from '../utils/EventBus.js';
 import performanceMonitor from '../utils/PerformanceMonitor.js';
 import { EVENTS, TIMING, SELECTORS, BALL_STATUS } from '../constants.js';
@@ -14,6 +15,8 @@ import { validateSubtitleData } from '../utils/validators.js';
 class SubtitleService {
   constructor() {
     this.capturedSubtitleUrl = null;
+    // 创建模块专用日志记录器
+    this.log = LogDecorator.createModuleLogger('SubtitleService');
     this.setupInterceptor();
   }
 
@@ -31,6 +34,7 @@ class SubtitleService {
 
     unsafeWindow.XMLHttpRequest.prototype.send = function() {
       if (this._url && this._url.includes('aisubtitle.hdslb.com')) {
+        subtitleService.log.trace('拦截到字幕请求:', this._url);
         subtitleService.capturedSubtitleUrl = this._url;
         state.subtitle.capturedUrl = this._url;
 
@@ -48,9 +52,11 @@ class SubtitleService {
    */
   async downloadCapturedSubtitle() {
     if (!this.capturedSubtitleUrl) {
+      this.log.debug('没有捕获到字幕URL');
       return;
     }
-
+    
+    this.log.debug('开始下载字幕，URL:', this.capturedSubtitleUrl);
     // 性能监控：测量字幕下载耗时
     await performanceMonitor.measureAsync('字幕下载', async () => {
       const videoInfo = getVideoInfo();
@@ -79,7 +85,8 @@ class SubtitleService {
         // 验证字幕数据
         const validation = validateSubtitleData(subtitleData);
         if (!validation.valid) {
-          logger.error('SubtitleService', '字幕验证失败:', validation.error);
+          this.log.success(`字幕捕获成功，共 ${subtitleData.length} 条`);
+          this.log.trace('字幕数据示例:', subtitleData.slice(0, 3));
           if (validation.details) {
             logger.error('SubtitleService', '验证详情:', validation.details);
           }
@@ -91,7 +98,7 @@ class SubtitleService {
         state.setBallStatus(BALL_STATUS.ACTIVE);
 
       } catch (error) {
-        logger.error('SubtitleService', '字幕获取失败:', error);
+        this.log.error('字幕下载失败:', error);
         state.setBallStatus(BALL_STATUS.ERROR);
         eventBus.emit(EVENTS.SUBTITLE_FAILED, error.message);
       } finally {

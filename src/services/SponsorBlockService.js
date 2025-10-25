@@ -16,6 +16,13 @@ class SponsorBlockAPI {
   constructor() {
     this.cache = new Map();
     this.pendingRequests = new Map();
+    this.requestQueue = [];
+    this.isProcessingQueue = false;
+
+    // 速率限制配置
+    this.maxConcurrentRequests = 2; // 最大并发请求数
+    this.minRequestInterval = 200; // 最小请求间隔（毫秒）
+    this.lastRequestTime = 0;
   }
 
   /**
@@ -35,7 +42,100 @@ class SponsorBlockAPI {
       return this.pendingRequests.get(bvid);
     }
 
+    // 创建请求任务
+    const task = {
+      bvid,
+      resolve: null,
+      reject: null,
+      retryCount: 0,
+      lastError: null
+    };
+
     const promise = new Promise((resolve, reject) => {
+      task.resolve = resolve;
+      task.reject = reject;
+    });
+
+    this.pendingRequests.set(bvid, promise);
+    this.requestQueue.push(task);
+
+    // 开始处理队列
+    this.processQueue();
+
+    // 清理逻辑
+    promise.finally(() => {
+      this.pendingRequests.delete(bvid);
+    });
+
+    return promise;
+  }
+
+  /**
+   * 处理请求队列
+   */
+  async processQueue() {
+    if (this.isProcessingQueue) return;
+    this.isProcessingQueue = true;
+
+    while (this.requestQueue.length > 0) {
+      const activeRequests = this.getActiveRequestCount();
+      if (activeRequests >= this.maxConcurrentRequests) {
+        await this.waitForRequestSlot();
+        continue;
+      }
+
+      const task = this.requestQueue.shift();
+      if (task) {
+        this.executeRequest(task);
+      }
+    }
+
+    this.isProcessingQueue = false;
+  }
+
+  /**
+   * 执行单个请求
+   */
+  async executeRequest(task) {
+    // 速率限制：确保最小请求间隔
+    const timeSinceLastRequest = Date.now() - this.lastRequestTime;
+    if (timeSinceLastRequest < this.minRequestInterval) {
+      await new Promise(resolve =>
+        setTimeout(resolve, this.minRequestInterval - timeSinceLastRequest)
+      );
+    }
+
+    this.lastRequestTime = Date.now();
+
+    try {
+      const result = await this.makeRequestWithRetry(task.bvid, task.retryCount);
+      task.resolve(result);
+    } catch (error) {
+      task.lastError = error;
+      task.retryCount++;
+
+      // 检查是否应该重试
+      if (this.shouldRetry(error, task.retryCount)) {
+        // 指数退避延迟
+        const delay = this.calculateRetryDelay(task.retryCount, error);
+        logger.debug('SponsorBlockAPI', `重试请求 ${task.bvid} (第${task.retryCount}次), 延迟${delay}ms`);
+
+        setTimeout(() => {
+          this.requestQueue.unshift(task); // 重新插入队列头部
+          this.processQueue();
+        }, delay);
+      } else {
+        logger.warn('SponsorBlockAPI', `获取视频 ${task.bvid} 片段失败 (已重试${task.retryCount - 1}次):`, error.message);
+        task.reject(error);
+      }
+    }
+  }
+
+  /**
+   * 实际执行HTTP请求
+   */
+  async makeRequestWithRetry(bvid, retryCount = 0) {
+    return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method: "GET",
         url: `${SPONSORBLOCK.API_URL}?videoID=${bvid}`,
@@ -43,10 +143,11 @@ class SponsorBlockAPI {
           "origin": "userscript-bilibili-sponsor-skip",
           "x-ext-version": "1.0.0"
         },
-        timeout: 10000, // 增加超时时间到10秒
+        timeout: 15000, // 增加超时时间到15秒
         onload: (response) => {
           try {
             if (response.status === 404) {
+              // 没有找到片段数据，返回空数组
               const result = [];
               this.cache.set(bvid, { data: result, timestamp: Date.now() });
               resolve(result);
@@ -55,36 +156,94 @@ class SponsorBlockAPI {
               this.cache.set(bvid, { data, timestamp: Date.now() });
               resolve(data);
             } else if (response.status === 400) {
-              console.error('[SponsorBlock] 参数错误 (400)');
-              reject(new Error('Bad request'));
+              reject(new Error(`参数错误 (400)`));
             } else if (response.status === 429) {
-              console.error('[SponsorBlock] 请求频繁 (429)');
-              reject(new Error('Rate limited'));
+              reject(new Error(`请求频繁 (429)`));
             } else {
               reject(new Error(`HTTP ${response.status}`));
             }
           } catch (error) {
-            reject(error);
+            reject(new Error(`解析响应失败: ${error.message}`));
           }
         },
-        onerror: reject,
-        ontimeout: () => reject(new Error('Timeout'))
+        onerror: (error) => {
+          reject(new Error(`网络错误: ${error.message || 'Unknown error'}`));
+        },
+        ontimeout: () => {
+          reject(new Error('Timeout'));
+        }
       });
     });
+  }
 
-    this.pendingRequests.set(bvid, promise);
-    
-    // 确保清理 pending 请求，并捕获所有错误
-    promise
-      .catch(error => {
-        logger.debug('SponsorBlockAPI', `获取视频 ${bvid} 片段失败:`, error.message);
-        return []; // 返回空数组作为降级处理
-      })
-      .finally(() => {
-        this.pendingRequests.delete(bvid);
-      });
+  /**
+   * 判断是否应该重试
+   */
+  shouldRetry(error, retryCount) {
+    const maxRetries = 3;
 
-    return promise;
+    if (retryCount >= maxRetries) {
+      return false;
+    }
+
+    // 对某些错误类型进行特殊处理
+    if (error.message.includes('429')) {
+      // 速率限制错误，允许更多重试
+      return retryCount < 5;
+    }
+
+    if (error.message.includes('Timeout') ||
+        error.message.includes('网络错误') ||
+        error.message.includes('HTTP 5')) {
+      // 网络相关错误，应该重试
+      return true;
+    }
+
+    // 其他错误不重试
+    return false;
+  }
+
+  /**
+   * 计算重试延迟
+   */
+  calculateRetryDelay(retryCount, error) {
+    let baseDelay = 1000; // 1秒基础延迟
+
+    if (error.message.includes('429')) {
+      // 速率限制错误，使用更长的延迟
+      baseDelay = 5000; // 5秒
+    }
+
+    // 指数退避：1秒、2秒、4秒、8秒...
+    const exponentialDelay = baseDelay * Math.pow(2, retryCount - 1);
+
+    // 添加随机抖动，避免大量请求同时重试
+    const jitter = Math.random() * 1000;
+
+    return Math.min(exponentialDelay + jitter, 30000); // 最大30秒延迟
+  }
+
+  /**
+   * 获取当前活跃请求数量
+   */
+  getActiveRequestCount() {
+    return this.pendingRequests.size;
+  }
+
+  /**
+   * 等待请求槽位可用
+   */
+  async waitForRequestSlot() {
+    return new Promise(resolve => {
+      const checkSlot = () => {
+        if (this.getActiveRequestCount() < this.maxConcurrentRequests) {
+          resolve();
+        } else {
+          setTimeout(checkSlot, 100);
+        }
+      };
+      checkSlot();
+    });
   }
 
   /**

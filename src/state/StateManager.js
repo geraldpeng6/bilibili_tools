@@ -7,6 +7,8 @@ import { BALL_STATUS } from '../constants.js';
 import { generateCacheKey, validateVideoInfo } from '../utils/validators.js';
 import eventBus from '../utils/EventBus.js';
 import { EVENTS } from '../constants.js';
+import taskManager from '../utils/TaskManager.js';
+import logger from '../utils/DebugLogger.js';
 
 class StateManager {
   constructor() {
@@ -73,6 +75,25 @@ class StateManager {
     const validation = validateVideoInfo(videoInfo);
     if (!validation.valid) {
       return false;
+    }
+    
+    // 检测视频切换
+    const oldBvid = this.video.bvid;
+    const newBvid = videoInfo.bvid;
+    
+    if (oldBvid && oldBvid !== newBvid) {
+      logger.info('StateManager', `检测到视频切换: ${oldBvid} -> ${newBvid}`);
+      
+      // 取消旧视频的所有运行中任务
+      taskManager.cancelVideoTasks(oldBvid);
+      
+      // 发送视频切换事件
+      eventBus.emit(EVENTS.VIDEO_CHANGED, {
+        oldBvid,
+        newBvid,
+        oldVideoInfo: { ...this.video },
+        newVideoInfo: videoInfo
+      });
     }
 
     this.video.bvid = videoInfo.bvid;

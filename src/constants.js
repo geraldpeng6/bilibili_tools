@@ -32,6 +32,15 @@ export const LIMITS = {
   NOTION_PAGE_ID_LENGTH: 32,          // Notion Page ID的标准长度
 };
 
+// ==================== 笔记配置 ====================
+export const NOTES_CONFIG = {
+  STORAGE_KEY: 'bilibili_notes',      // localStorage存储键名
+  STORAGE_CLEANUP_SIZE: 4.5 * 1024 * 1024, // 4.5MB触发清理
+  MAX_SCREENSHOTS: 10,                // 最大截图数量
+  MAX_TEXT_NOTES: 100,                // 最大文本笔记数量
+  BLUE_DOT_HIDE_TIMEOUT: 3000,        // 保存点自动隐藏时间
+};
+
 // ==================== 状态类型 ====================
 export const BALL_STATUS = {
   IDLE: 'idle',                       // 初始状态
@@ -77,8 +86,7 @@ const DEFAULT_PROMPT_1 = `请用中文总结以下视频字幕内容，使用Mar
 3. 第三部分使用 --- 分隔线
 4. 后续内容按主题使用 ### 三级标题分段
 5. 使用项目符号 - 列出要点
-6. 不要在总结中包含任何时间戳
-7. 直接输出Markdown内容，不要使用代码块包裹（不要使用\`\`\`）
+6. 直接输出Markdown内容，不要使用代码块包裹（不要使用\`\`\`）
 
 字幕内容：
 `;
@@ -222,6 +230,9 @@ export const STORAGE_KEYS = {
   NOTION_CONTENT_SUMMARY: 'notion_content_summary',
   NOTION_CONTENT_SEGMENTS: 'notion_content_segments',
   NOTION_CONTENT_SUBTITLES: 'notion_content_subtitles',
+  
+  // 任务管理
+  PROCESSED_VIDEOS: 'bilibili_tools_processed_videos',
 };
 
 // ==================== Z-Index层级 ====================
@@ -273,15 +284,12 @@ export const SPONSORBLOCK = {
   API_URL: 'https://bsbsb.top/api/skipSegments',
   CACHE_EXPIRY: 1800000, // 30分钟
   
-  // 视频质量配置
-  MIN_SCORE: 0.06,
-  MIN_VIEWS: 1000,
-  TAG_COLOR: 'linear-gradient(135deg, #FF6B6B, #FF4D4D)',
-  TAG_TEXT: '🔥 精选',
-  TOP_TAG_COLOR: 'linear-gradient(135deg, #FFD700, #FFA500)',
-  TOP_TAG_TEXT: '🏆 顶级',
-  AD_TAG_COLOR: 'linear-gradient(135deg, #FF8C00, #FF6347)',
-  AD_TAG_TEXT: '⚠️ 含广告',
+  // 油猴菜单命令
+  MENU_COMMAND_DEBUG: '🔧 调试模式',
+  MENU_COMMAND_RESET_POSITION: '🔄 重置字幕面板位置',
+  MENU_COMMAND_SHORTCUT_SETTINGS: '⌨️ 快捷键设置',
+  MENU_COMMAND_AI_SETTINGS: '🤖 AI配置',
+  MENU_COMMAND_SPONSORBLOCK_SETTINGS: '⚡ SponsorBlock配置',
   
   // 片段类别配置
   CATEGORIES: {

@@ -7,13 +7,19 @@ import config from '../config/ConfigManager.js';
 import state from '../state/StateManager.js';
 import eventBus from '../utils/EventBus.js';
 import performanceMonitor from '../utils/PerformanceMonitor.js';
-import notionService from './NotionService.js';
 import notesService from './NotesService.js';
-import logger from '../utils/DebugLogger.js';
+import notionService from './NotionService.js';
+import { getVideoTitle, getVideoUrl } from '../utils/helpers.js';
+import taskManager from '../utils/TaskManager.js';
 import { EVENTS, TIMING } from '../constants.js';
 import { withTimeout } from '../utils/helpers.js';
+import LogDecorator from '../utils/LogDecorator.js';
 
 class AIService {
+  constructor() {
+    // 创建模块专用日志记录器
+    this.log = LogDecorator.createModuleLogger('AIService');
+  }
   /**
    * 获取OpenRouter模型列表
    * @param {string} apiKey - API Key
@@ -38,25 +44,20 @@ class AIService {
   }
 
   /**
-   * 生成AI总结（三次独立请求）
+   * 生成AI总结
    * @param {Array} subtitleData - 字幕数据
-   * @param {boolean} isAuto - 是否自动触发
-   * @returns {Promise<{markdown: string, segments: Array, ads: Array}>}
+   * @param {boolean} isManual - 是否手动触发
+   * @returns {Promise<{markdown: string, segments: Array}>} - 返回两个AI总结
    */
-  async summarize(subtitleData, isAuto = false) {
-    // 检查是否正在总结
-    if (!state.startAISummary()) {
-      throw new Error('已有总结任务在进行中');
-    }
-
+  async summarize(subtitleData, isManual = false) {
     // 性能监控：测量AI总结耗时
     return await performanceMonitor.measureAsync('AI总结', async () => {
       try {
         const aiConfig = config.getSelectedAIConfig();
-        
-        if (!aiConfig) {
-          throw new Error('未找到AI配置，请先在设置中添加配置');
-        }
+          
+          if (!aiConfig) {
+            throw new Error('未找到AI配置，请先在设置中添加配置');
+          }
 
         if (!aiConfig.apiKey || aiConfig.apiKey.trim() === '') {
           throw new Error('请先配置 AI API Key\n\n请点击右上角设置按钮，选择"AI配置"，然后为所选的AI服务商配置API Key');
@@ -96,10 +97,83 @@ class AIService {
           headers['X-Title'] = 'Bilibili Subtitle Extractor';
         }
 
-        // 检查是否需要广告检测
+        // 获取当前视频信息
         const videoInfo = state.getVideoInfo();
-        const videoDuration = document.querySelector('video')?.duration || 0;
-        const shouldDetectAds = videoDuration > 300; // 超过5分钟的视频才检测广告
+        const videoTitle = getVideoTitle();
+        const videoUrl = getVideoUrl();
+        const bvid = videoInfo?.bvid;
+        
+        // 如果是手动触发，清除该视频的处理记录
+        if (isManual && bvid) {
+          taskManager.clearVideoProcessed(bvid);
+        }
+        
+        // 创建任务上下文，固定视频信息
+        const taskVideoInfo = {
+          bvid,
+          cid: videoInfo?.cid,
+          aid: videoInfo?.aid,
+          title: videoTitle,
+          url: videoUrl
+        };
+        
+        // 创建任务
+        const taskId = taskManager.createTask(
+          'ai_summary', 
+          taskVideoInfo,
+          async (taskContext) => {
+            return await this._executeSummaryTask(subtitleData, aiConfig, headers, pureSubtitleText, timestampedSubtitleText, taskContext);
+          },
+          isManual
+        );
+        
+        if (!taskId) {
+          this.log.info('视频已自动处理过，跳过自动任务');
+          return null;
+        }
+        
+        // 触发AI总结开始事件（启动粉色小球呼吸效果）
+        eventBus.emit(EVENTS.AI_SUMMARY_START);
+        
+        // 获取任务结果
+        const task = taskManager.activeTasks.get(taskId);
+        if (!task) {
+          throw new Error('任务创建失败');
+        }
+        
+        // 等待任务完成
+        while (task.status === 'pending' || task.status === 'running') {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        if (task.status === 'completed') {
+          return task.result;
+        } else if (task.error) {
+          throw task.error;
+        } else {
+          throw new Error('任务被取消');
+        }
+        
+      } catch (error) {
+        // 发生错误时，确保状态正确重置
+        state.cancelAISummary();
+        eventBus.emit(EVENTS.AI_SUMMARY_FAILED, error.message);
+        throw error;
+      }
+    });
+  }
+  
+  /**
+   * 执行总结任务
+   * @private
+   */
+  async _executeSummaryTask(subtitleData, aiConfig, headers, pureSubtitleText, timestampedSubtitleText, taskContext) {
+    try {
+      const { videoInfo, signal } = taskContext;
+      
+      // 检查是否需要广告检测
+      const videoDuration = document.querySelector('video')?.duration || 0;
+      const shouldDetectAds = videoDuration > 300; // 超过5分钟的视频才检测广告
 
         // 准备请求数组
         const aiRequests = [
@@ -117,8 +191,13 @@ class AIService {
           );
         }
 
-        // 并行执行所有AI请求
-        const results = await Promise.all(aiRequests);
+        // 并行执行所有AI请求（传入signal以支持取消）
+      const results = await Promise.race([
+        Promise.all(aiRequests),
+        new Promise((_, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('Task aborted')));
+        })
+      ]);
         
         // 组合结果
         const combinedResult = {
@@ -133,66 +212,76 @@ class AIService {
         }
         
         // 调试日志
-        logger.debug('AIService', 'Markdown总结长度:', combinedResult.markdown?.length || 0);
-        logger.debug('AIService', '段落数量:', combinedResult.segments?.length || 0);
+        this.log.debug('Markdown总结长度:', combinedResult.markdown?.length || 0);
+        this.log.debug('段落数量:', combinedResult.segments?.length || 0);
+        this.log.trace('段落详情:', combinedResult.segments);
         
         if (combinedResult.segments.length === 0) {
-          logger.warn('AIService', '段落总结为空，请检查AI返回内容');
+          this.log.warn('段落总结为空，请检查AI返回内容');
         }
         
         if (combinedResult.ads && combinedResult.ads.length > 0) {
-          logger.info('AIService', '检测到广告段落:', combinedResult.ads.length);
+          this.log.info('检测到广告段落:', combinedResult.ads.length);
           // 将广告段落添加到进度条标记
           this._applyAdSegments(combinedResult.ads);
         }
 
-        // 完成总结
-        state.finishAISummary(combinedResult);
-        
-        // 只有两个AI总结都成功才保存到笔记
-        try {
-          const videoInfo = state.getVideoInfo();
-          const summaryNote = notesService.addAISummary({
-            summary: combinedResult.markdown,
-            segments: combinedResult.segments,
-            videoInfo: videoInfo,
-            videoBvid: videoInfo?.bvid
-          });
-          logger.info('AIService', '✅ 两个AI总结都成功，已保存到笔记，笔记ID:', summaryNote.id);
-        } catch (error) {
-          logger.error('AIService', '保存AI总结到笔记失败:', error);
-        }
-        
-        // 如果配置了Notion且有页面，自动发送AI总结
-        try {
-          const notionConfig = config.getNotionConfig();
-          const videoInfo = state.getVideoInfo();
-          const bvid = videoInfo?.bvid;
-          
-          if (notionConfig.apiKey && bvid) {
-            const pageId = state.getNotionPageId(bvid);
-            if (pageId) {
-              // 异步发送AI总结到Notion，不阻塞返回
-              notionService.sendAISummary(combinedResult).catch(error => {
-                console.error('[AIService] 发送AI总结到Notion失败:', error);
-              });
-            }
-          }
-        } catch (error) {
-          console.error('[AIService] 检查Notion配置失败:', error);
-        }
-        
-        return combinedResult;
-
+        // 完成总结（使用任务中的固定视频信息）
+      state.finishAISummary(combinedResult);
+      
+      // 保存到笔记（使用任务中的固定视频信息）
+      try {
+        const summaryNote = notesService.addAISummary({
+          summary: combinedResult.markdown,
+          segments: combinedResult.segments,
+          videoInfo: videoInfo,
+          videoBvid: videoInfo.bvid
+        });
+        this.log.success('任务完成，已保存到笔记，笔记ID:', summaryNote.id);
       } catch (error) {
-        // 发生错误时，确保状态正确重置
-        state.cancelAISummary();
-        eventBus.emit(EVENTS.AI_SUMMARY_FAILED, error.message);
-        throw error;
+        this.log.error('保存AI总结到笔记失败:', error);
       }
-    });
-  }
+      
+      // 后台发送到Notion（使用任务中的固定视频信息）
+      try {
+        const notionConfig = config.getNotionConfig();
+        const notionAutoEnabled = config.getNotionAutoSendEnabled();
+        
+        // 检查是否启用了自动发送并且有配置
+        if (notionAutoEnabled && notionConfig.apiKey && videoInfo.bvid) {
+          // 创建Notion发送任务
+          taskManager.createTask(
+            'notion_send_summary',
+            videoInfo,
+            async (notionTaskContext) => {
+              // 获取字幕数据
+              const subtitleData = state.getSubtitleData();
+              
+              // 使用统一的sendToNotion方法
+              await notionService.sendToNotion({
+                videoInfo: notionTaskContext.videoInfo,
+                aiSummary: combinedResult,
+                subtitleData: subtitleData,
+                isAuto: true
+              });
+            },
+            false // 自动任务
+          );
+        }
+      } catch (error) {
+        console.error('[AIService] 创建Notion任务失败:', error);
+      }
+      
+      return combinedResult;
 
+    } catch (error) {
+      // 发生错误时，确保状态正确重置
+      state.cancelAISummary();
+      eventBus.emit(EVENTS.AI_SUMMARY_FAILED, error.message);
+      throw error;
+    }
+  }
+  
   /**
    * 执行单个AI请求
    * @private
@@ -262,7 +351,7 @@ class AIService {
    * @returns {Array} 解析后的段落数组
    */
   _parseJSONResponse(content) {
-    logger.debug('AIService', '尝试解析JSON响应，原始内容长度:', content?.length || 0);
+    this.log.trace('尝试解析JSON响应，原始内容长度:', content?.length || 0);
     
     try {
       // 先尝试清理内容
@@ -284,28 +373,48 @@ class AIService {
       // 尝试提取JSON部分
       const jsonMatch = cleanContent.match(/\{[\s\S]*\}/); 
       if (jsonMatch) {
-        logger.debug('AIService', '找到JSON匹配:', jsonMatch[0].substring(0, 100) + '...');
-        const json = JSON.parse(jsonMatch[0]);
+        this.log.trace('找到JSON匹配:', jsonMatch[0].substring(0, 100) + '...');
+        
+        // 修复常见的JSON格式问题
+        let fixedJson = jsonMatch[0];
+        
+        // 修复数组元素之间缺少逗号的问题
+        // 在 }{ 之间添加逗号
+        fixedJson = fixedJson.replace(/\}\s*\{/g, '},{');
+        
+        // 修复多余的逗号（如果有的话）
+        fixedJson = fixedJson.replace(/,\s*\]/g, ']');
+        fixedJson = fixedJson.replace(/,\s*\}/g, '}');
+        
+        // 尝试解析修复后的JSON
+        let json;
+        try {
+          json = JSON.parse(fixedJson);
+        } catch (firstError) {
+          // 如果修复后仍然失败，尝试原始内容
+          this.log.debug('修复后的JSON仍然解析失败，尝试原始内容');
+          json = JSON.parse(jsonMatch[0]);
+        }
+        
         const segments = Array.isArray(json.segments) ? json.segments : (Array.isArray(json) ? json : []);
 
         if (segments.length > 0) {
-          logger.debug('AIService', '成功解析段落数量:', segments.length);
+          this.log.debug('成功解析段落数量:', segments.length);
           return segments.map(segment => ({
             timestamp: this._normalizeTimestamp(segment.timestamp),
             title: segment.title || '',
             summary: segment.summary || ''
           }));
         } else {
-          logger.warn('AIService', 'JSON中没有找到segments数组，json内容:', json);
+          this.log.warn('JSON中没有找到segments数组，json内容:', json);
         }
       } else {
-        logger.warn('AIService', '响应中没有找到JSON格式内容，原始内容前200字符:', cleanContent.substring(0, 200));
+        this.log.warn('响应中没有找到JSON格式内容，原始内容前200字符:', cleanContent.substring(0, 200));
       }
     } catch (e) {
-      console.error('[AIService] JSON解析失败:', e, '\n原始内容前200字符:', content?.substring(0, 200));
+      this.log.error('JSON解析失败:', e, '原始内容前200字符:', content?.substring(0, 200));
     }
     
-    // 返回空数组作为降级处理
     return [];
   }
 
@@ -327,7 +436,7 @@ class AIService {
       if (match) {
         // 替换代码块为其内容
         cleanContent = cleanContent.replace(/```markdown\s*[\s\S]*?```/, match[1].trim());
-        logger.debug('AIService', '从markdown代码块中提取内容');
+        this.log.trace('从markdown代码块中提取内容');
       } else {
         break;
       }
@@ -342,7 +451,7 @@ class AIService {
       if (lines[0] && !lines[0].includes(' ') && lines[0].length < 20) {
         cleanContent = lines.slice(1).join('\n').trim();
       }
-      logger.debug('AIService', '从代码块中提取内容');
+      this.log.trace('从代码块中提取内容');
     }
     
     // 3. 处理部分内容在代码块中的情况
@@ -469,15 +578,21 @@ class AIService {
   _getDefaultPrompt2() {
     return `分析以下带时间戳的字幕，提取5-8个关键段落。
 
-重要：你的回复必须只包含JSON，不要有任何其他文字、解释或markdown标记。
-直接以{开始，以}结束。
+重要：
+1. 你的回复必须是一个完整且有效的JSON
+2. 不要有任何其他文字、解释或markdown标记
+3. 直接以{开始，以}结束
+4. 数组元素之间必须用逗号分隔
 
-JSON格式要求：
-{"segments":[
-  {"timestamp":"分钟:秒","title":"标题(10字内)","summary":"内容总结(30-50字)"}
-]}
+JSON格式要求（注意逗号）：
+{
+  "segments": [
+    {"timestamp":"分钟:秒","title":"标题(10字内)","summary":"内容总结(30-50字)"},
+    {"timestamp":"分钟:秒","title":"标题(10字内)","summary":"内容总结(30-50字)"}
+  ]
+}
 
-示例（你的回复应该像这样）：
+正确示例（特别注意元素之间的逗号）：
 {"segments":[{"timestamp":"00:15","title":"开场介绍","summary":"主持人介绍今天的主题和嘉宾背景"},{"timestamp":"02:30","title":"核心观点","summary":"讨论技术发展趋势和未来展望"}]}
 
 字幕内容：
@@ -519,7 +634,7 @@ JSON格式要求：
    * @returns {Array} 解析后的广告段落数组
    */
   _parseAdResponse(content) {
-    logger.debug('AIService', '解析广告检测响应，原始内容长度:', content?.length || 0);
+    this.log.trace('解析广告检测响应，原始内容长度:', content?.length || 0);
     
     try {
       // 清理内容
@@ -544,7 +659,7 @@ JSON格式要求：
         const json = JSON.parse(jsonMatch[0]);
         
         if (json.hasAds && Array.isArray(json.segments)) {
-          logger.info('AIService', '检测到广告段落:', json.segments.length);
+          this.log.info('检测到广告段落:', json.segments.length);
           // 转换时间格式为秒数
           return json.segments.map(segment => {
             const startTime = this._parseTimeToSeconds(segment.start);
@@ -559,7 +674,7 @@ JSON格式要求：
         }
       }
     } catch (e) {
-      logger.warn('AIService', '广告检测解析失败:', e);
+      this.log.warn('广告检测解析失败:', e);
     }
     
     return [];
@@ -617,10 +732,10 @@ JSON格式要求：
         // 重新渲染进度条标记
         sponsorBlockService.playerController.renderProgressMarkers();
         
-        logger.info('AIService', '已将广告段落添加到进度条标记');
+        this.log.info('已将广告段落添加到进度条标记');
       }
     } catch (error) {
-      logger.warn('AIService', '添加广告段落到标记失败:', error);
+      this.log.warn('添加广告段落到标记失败:', error);
     }
   }
 

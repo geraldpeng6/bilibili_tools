@@ -177,8 +177,8 @@ class EventHandlers {
         }
         
         try {
-          // 触发AI总结（会同时生成markdown总结和JSON段落）
-          await aiService.summarize(subtitleData, false);
+          // 触发AI总结（会同时生成markdown总结和JSON段落，手动触发）
+          await aiService.summarize(subtitleData, true);
           
           // 自动切换到总结标签页
           const summaryTab = container?.querySelector('.subtitle-tab[data-tab="summary"]');
@@ -236,13 +236,19 @@ class EventHandlers {
         }
         
         const subtitleData = state.getSubtitleData();
-        if (!subtitleData) {
-          notification.error('没有可用的字幕数据');
+        if (!subtitleData || subtitleData.length === 0) {
+          notification.error('没有字幕数据可发送');
           return;
         }
         
         try {
-          await notionService.sendSubtitle(subtitleData, false);
+          // 获取视频信息和AI总结
+          const videoInfo = state.getVideoInfo();
+          const videoKey = state.getVideoKey();
+          const aiSummary = videoKey ? state.getAISummary(videoKey) : null;
+          
+          // 发送完整内容（包括AI总结和字幕）
+          await notionService.sendComplete(subtitleData, aiSummary, videoInfo);
         } catch (error) {
           notification.handleError(error, 'Notion发送');
         }
@@ -1291,8 +1297,8 @@ class EventHandlers {
         this.hideAIConfigModal();
         
         try {
-          // 触发AI总结（会同时生成markdown总结和JSON段落）
-          await aiService.summarize(subtitleData, false);
+          // 触发AI总结（会同时生成markdown总结和JSON段落，手动触发）
+          await aiService.summarize(subtitleData, true);
           
           // 自动切换到总结标签页
           const container = document.getElementById('subtitle-container');

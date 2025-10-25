@@ -2,22 +2,16 @@
  * 笔记服务模块
  * 管理用户选中文字的笔记保存和管理
  */
-
+import state from '../state/StateManager.js';
 import logger from '../utils/DebugLogger.js';
-
-const NOTES_CONFIG = {
-  STORAGE_KEY: 'bilibili_subtitle_notes',
-  BLUE_DOT_SIZE: 14,
-  BLUE_DOT_COLOR: '#feebea',
-  BLUE_DOT_HIDE_TIMEOUT: 5000,
-  MAX_SCREENSHOTS: 10, // 最多保存10个截图
-  MAX_TEXT_NOTES: 100, // 最多保存100条文本笔记
-  STORAGE_WARNING_SIZE: 4 * 1024 * 1024, // 4MB时警告
-  STORAGE_CLEANUP_SIZE: 4.5 * 1024 * 1024, // 4.5MB时自动清理
-};
+import LogDecorator from '../utils/LogDecorator.js';
+import eventBus from '../utils/EventBus.js';
+import { EVENTS, NOTES_CONFIG } from '../constants.js';
 
 class NotesService {
   constructor() {
+    // 创建模块专用日志记录器
+    this.log = LogDecorator.createModuleLogger('NotesService');
     this.blueDot = null;
     this.blueDotHideTimeout = null;
     this.savedSelectionText = '';
@@ -28,13 +22,13 @@ class NotesService {
    * 初始化笔记服务
    */
   init() {
-    logger.debug('NotesService', '初始化笔记服务...');
+    this.log.debug('初始化笔记服务...');
     try {
       this.createBlueDot();
       this.initSelectionListener();
-      logger.debug('NotesService', '✓ 笔记服务初始化成功');
+      this.log.success('笔记服务初始化成功');
     } catch (error) {
-      logger.error('NotesService', '✗ 初始化失败:', error);
+      this.log.error('初始化失败:', error);
     }
   }
 
@@ -47,7 +41,7 @@ class NotesService {
       const data = localStorage.getItem(NOTES_CONFIG.STORAGE_KEY);
       return data ? JSON.parse(data) : [];
     } catch (error) {
-      console.error('读取笔记数据失败:', error);
+      this.log.error('读取笔记数据失败:', error);
       return [];
     }
   }
@@ -64,7 +58,7 @@ class NotesService {
       
       // 检查存储大小
       if (dataSize > NOTES_CONFIG.STORAGE_CLEANUP_SIZE) {
-        logger.warn('NotesService', '笔记存储空间过大，执行自动清理');
+        this.log.warn('笔记存储空间过大，执行自动清理');
         notes = this.cleanupNotes(notes);
       }
       
@@ -72,21 +66,21 @@ class NotesService {
         localStorage.setItem(NOTES_CONFIG.STORAGE_KEY, JSON.stringify(notes));
       } catch (quotaError) {
         // 如果还是超出配额，强制清理旧数据
-        console.error('存储配额超限，强制清理旧数据');
+        this.log.error('存储配额超限，强制清理旧数据');
         notes = this.forceCleanupNotes(notes);
         localStorage.setItem(NOTES_CONFIG.STORAGE_KEY, JSON.stringify(notes));
       }
     } catch (error) {
-      console.error('保存笔记数据失败:', error);
+      this.log.error('保存笔记数据失败:', error);
       // 如果是配额错误，尝试清理后重试
       if (error.name === 'QuotaExceededError') {
-        console.error('存储配额已满，清理旧数据后重试');
+        this.log.error('存储配额已满，清理旧数据后重试');
         const cleanedNotes = this.forceCleanupNotes(notes);
         try {
           localStorage.setItem(NOTES_CONFIG.STORAGE_KEY, JSON.stringify(cleanedNotes));
-          logger.debug('NotesService', '清理后保存成功');
+          this.log.success('清理后保存成功');
         } catch (retryError) {
-          console.error('清理后仍然失败:', retryError);
+          this.log.error('清理后仍然失败:', retryError);
           throw retryError;
         }
       }
@@ -106,7 +100,7 @@ class NotesService {
     // 限制文本笔记数量
     const keptTextNotes = textNotes.slice(0, NOTES_CONFIG.MAX_TEXT_NOTES);
     
-    logger.debug('NotesService', `清理笔记: 保留 ${keptScreenshots.length}/${screenshots.length} 个截图, ${keptTextNotes.length}/${textNotes.length} 条文本`);
+    this.log.debug(`清理笔记: 保留 ${keptScreenshots.length}/${screenshots.length} 个截图, ${keptTextNotes.length}/${textNotes.length} 条文本`);
     
     // 合并并按时间排序
     return [...keptScreenshots, ...keptTextNotes].sort((a, b) => b.timestamp - a.timestamp);
@@ -123,7 +117,7 @@ class NotesService {
     const keptScreenshots = screenshots.slice(0, 5);
     const keptTextNotes = textNotes.slice(0, 50);
     
-    logger.warn('NotesService', `强制清理: 保留 ${keptScreenshots.length}/${screenshots.length} 个截图, ${keptTextNotes.length}/${textNotes.length} 条文本`);
+    this.log.warn(`强制清理: 保留 ${keptScreenshots.length}/${screenshots.length} 个截图, ${keptTextNotes.length}/${textNotes.length} 条文本`);
     
     return [...keptScreenshots, ...keptTextNotes].sort((a, b) => b.timestamp - a.timestamp);
   }
@@ -155,7 +149,7 @@ class NotesService {
         if (!note.timestamp) {
           note.timestamp = note.createdAt;
         }
-        logger.info('NotesService', `添加新笔记(${note.type})，内容: ${options.content}`);
+        this.log.info(`添加新笔记(${note.type})，内容: ${options.content}`);
       } else {
         note = {
           id: Date.now() + Math.random().toString(36).substr(2, 9),
@@ -164,7 +158,7 @@ class NotesService {
           timestamp: Date.now(),
           type: 'text'
         };
-        logger.info('NotesService', `添加新笔记，内容长度: ${contentOrOptions.length}`);
+        this.log.info(`添加新笔记，内容长度: ${contentOrOptions.length}`);
       }
 
       let notes = this.getAllNotes();
@@ -173,7 +167,7 @@ class NotesService {
       if (note.type === 'screenshot') {
         const screenshots = notes.filter(n => n.type === 'screenshot');
         if (screenshots.length >= NOTES_CONFIG.MAX_SCREENSHOTS) {
-          logger.warn('NotesService', `截图数量超过限制(${NOTES_CONFIG.MAX_SCREENSHOTS})，删除最旧的截图`);
+          this.log.warn(`截图数量超过限制(${NOTES_CONFIG.MAX_SCREENSHOTS})，删除最旧的截图`);
           // 找到最旧的截图并删除
           const oldestScreenshot = screenshots[screenshots.length - 1];
           notes = notes.filter(n => n.id !== oldestScreenshot.id);
@@ -183,14 +177,14 @@ class NotesService {
       notes.unshift(note);
       this.saveNotes(notes);
       
-      logger.info('NotesService', `✓ 笔记已保存，当前总数: ${notes.length}`);
+      this.log.success(`笔记已保存，当前总数: ${notes.length}`);
       return note;
     } catch (error) {
-      logger.error('NotesService', '✗ 添加笔记失败:', error);
+      this.log.error('添加笔记失败:', error);
       
       // 如果是存储配额错误，提示用户
       if (error.name === 'QuotaExceededError' || error.message?.includes('exceeded')) {
-        console.error('[NotesService] 存储空间不足，请清理部分笔记');
+        this.log.error('存储空间不足，请清理部分笔记');
         // 可以通过UI提示用户
         if (window.notification) {
           window.notification.error('存储空间不足，已自动清理部分旧笔记');
@@ -223,10 +217,10 @@ class NotesService {
       notes.unshift(note);
       this.saveNotes(notes);
 
-      logger.info('NotesService', `✓ AI总结已保存`);
+      this.log.success('AI总结已保存');
       return note;
     } catch (error) {
-      logger.error('NotesService', '✗ 添加AI总结失败:', error);
+      this.log.error('添加AI总结失败:', error);
       throw error;
     }
   }
@@ -282,10 +276,10 @@ class NotesService {
       });
 
       this.saveNotes(notes);
-      logger.info('NotesService', `✓ 截图已添加到总结笔记`);
+      this.log.success('截图已添加到总结笔记');
       return note;
     } catch (error) {
-      logger.error('NotesService', '✗ 添加截图到总结失败:', error);
+      this.log.error('添加截图到总结失败:', error);
       throw error;
     }
   }
@@ -397,10 +391,10 @@ class NotesService {
    * 创建钢笔保存点元素
    */
   createBlueDot() {
-    logger.debug('NotesService', '创建笔记保存点元素...');
+    this.log.debug('创建笔记保存点元素...');
     
     if (this.blueDot) {
-      logger.debug('NotesService', '笔记保存点元素已存在');
+      this.log.debug('笔记保存点元素已存在');
       return this.blueDot;
     }
 
@@ -422,13 +416,13 @@ class NotesService {
       `;
 
       this.blueDot.addEventListener('mouseenter', () => {
-        logger.debug('NotesService', '鼠标进入保存点');
+        this.log.debug('鼠标进入保存点');
         this.blueDot.style.transform = 'scale(1.15)';
         this.blueDot.style.filter = 'drop-shadow(0 2px 4px rgba(254, 235, 234, 0.5))';
       });
 
       this.blueDot.addEventListener('mouseleave', () => {
-        logger.debug('NotesService', '鼠标离开保存点');
+        this.log.debug('鼠标离开保存点');
         this.blueDot.style.transform = 'scale(1)';
         this.blueDot.style.filter = 'none';
       });
@@ -436,10 +430,10 @@ class NotesService {
       this.blueDot.addEventListener('click', (e) => this.handleBlueDotClick(e));
 
       document.body.appendChild(this.blueDot);
-      logger.debug('NotesService', '✓ 笔记保存点元素已创建并添加到body');
+      this.log.debug('笔记保存点元素已创建并添加到body');
       return this.blueDot;
     } catch (error) {
-      logger.error('NotesService', '✗ 创建笔记保存点元素失败:', error);
+      this.log.error('创建笔记保存点元素失败:', error);
       return null;
     }
   }
@@ -450,12 +444,12 @@ class NotesService {
    * @param {number} y - Y坐标
    */
   showBlueDot(x, y) {
-    logger.debug('NotesService', `显示保存点在位置 (${x}, ${y})`);
+    this.log.debug(`显示保存点在位置 (${x}, ${y})`);
     
     try {
       const dot = this.createBlueDot();
       if (!dot) {
-        logger.error('NotesService', '✗ 无法获取保存点元素');
+        this.log.error('无法获取保存点元素');
         return;
       }
       
@@ -463,7 +457,6 @@ class NotesService {
       dot.style.top = `${y}px`;
       dot.style.display = 'block';
       
-      // logger.debug('NotesService', `✓ 保存点已显示`);
 
       if (this.blueDotHideTimeout) {
         clearTimeout(this.blueDotHideTimeout);

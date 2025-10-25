@@ -126,12 +126,16 @@ export class RequestFactory {
   /**
    * 创建SponsorBlock请求配置
    * @param {string} videoId
+   * @param {Array} categories - 要获取的广告类别
    * @returns {Object}
    */
-  static createSponsorBlockRequest(videoId) {
+  static createSponsorBlockRequest(videoId, categories = ['sponsor', 'intro', 'outro', 'selfpromo']) {
+    // 构建URL，使用多个category参数
+    const categoryParams = categories.map(c => `category=${encodeURIComponent(c)}`).join('&');
+    const url = `https://sponsor.ajay.app/api/skipSegments?videoID=${encodeURIComponent(videoId)}&${categoryParams}`;
+    
     return {
-      url: `https://sponsor.ajay.app/api/skipSegments`,
-      params: { videoID: videoId },
+      url: url,
       headers: {
         'origin': 'userscript-bilibili-sponsor-skip',
         'x-ext-version': '1.0.0'

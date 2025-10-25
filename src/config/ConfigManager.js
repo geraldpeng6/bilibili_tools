@@ -335,15 +335,21 @@ class ConfigManager {
   _getDefaultPrompt2() {
     return `分析以下带时间戳的字幕，提取5-8个关键段落。
 
-重要：你的回复必须只包含JSON，不要有任何其他文字、解释或markdown标记。
-直接以{开始，以}结束。
+重要：
+1. 你的回复必须是一个完整且有效的JSON
+2. 不要有任何其他文字、解释或markdown标记
+3. 直接以{开始，以}结束
+4. 数组元素之间必须用逗号分隔
 
-JSON格式要求：
-{"segments":[
-  {"timestamp":"分钟:秒","title":"标题(10字内)","summary":"内容总结(30-50字)"}
-]}
+JSON格式要求（注意逗号）：
+{
+  "segments": [
+    {"timestamp":"分钟:秒","title":"标题(10字内)","summary":"内容总结(30-50字)"},
+    {"timestamp":"分钟:秒","title":"标题(10字内)","summary":"内容总结(30-50字)"}
+  ]
+}
 
-示例（你的回复应该像这样）：
+正确示例（特别注意元素之间的逗号）：
 {"segments":[{"timestamp":"00:15","title":"开场介绍","summary":"主持人介绍今天的主题和嘉宾背景"},{"timestamp":"02:30","title":"核心观点","summary":"讨论技术发展趋势和未来展望"}]}
 
 字幕内容：

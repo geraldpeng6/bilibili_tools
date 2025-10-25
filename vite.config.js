@@ -6,16 +6,13 @@ export default defineConfig({
     monkey({
       entry: 'src/main.js',
       userscript: {
-        name: 'Bilibili Tools',
+        name: 'Bilibili & YouTube Tools',
         namespace: 'http://tampermonkey.net/',
-        version: '1.1.7',
-        description: '字幕提取、AI总结、Notion集成、笔记保存、播放速度控制、SponsorBlock广告跳过 - 六合一工具集',
+        version: '1.2.0',
+        description: '跨平台视频工具集：字幕提取、AI总结、Notion集成、笔记保存、播放速度控制、广告跳过 - 支持B站和YouTube',
         author: 'geraldpeng & claude 4.5 sonnet',
         license: 'MIT',
         match: [
-          '*://www.bilibili.com/*',
-          '*://search.bilibili.com/*',
-          '*://space.bilibili.com/*',
           '*://*/*'
         ],
         grant: [
