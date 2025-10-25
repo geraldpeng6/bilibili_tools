@@ -8,7 +8,7 @@ import state from '../state/StateManager.js';
 import eventBus from '../utils/EventBus.js';
 import logger from '../utils/DebugLogger.js';
 import { EVENTS, API, LIMITS } from '../constants.js';
-import { getVideoTitle, getVideoUrl, getVideoCreator } from '../utils/helpers.js';
+import { getVideoTitle, getVideoUrl, getVideoCreator, formatTime } from '../utils/helpers.js';
 
 class NotionService {
   /**
@@ -579,13 +579,19 @@ class NotionService {
       if (summary && summary.markdown) {
         // 确保markdown是字符串
         const markdownContent = String(summary.markdown || '');
-        // 将markdown内容转换为Notion blocks
+        // 将markdown内容分块，每块最多包含10行或1500字符
         const markdownLines = markdownContent.split('\n').filter(line => line !== undefined && line !== null);
         
-        markdownLines.forEach(line => {
-          // 确保line是字符串
+        let currentChunk = [];
+        let currentChunkLength = 0;
+        const maxLinesPerBlock = 10;
+        const maxCharsPerBlock = 1500;
+        
+        markdownLines.forEach((line, index) => {
           const trimmedLine = String(line || '').trim();
-          if (trimmedLine) {
+          
+          // 如果是空行且当前chunk有内容，则创建一个block并重新开始
+          if (!trimmedLine && currentChunk.length > 0) {
             blocks.push({
               object: 'block',
               type: 'paragraph',
@@ -593,13 +599,56 @@ class NotionService {
                 rich_text: [{ 
                   type: 'text', 
                   text: { 
-                    content: trimmedLine 
+                    content: currentChunk.join('\n') 
                   }
                 }]
               }
             });
+            currentChunk = [];
+            currentChunkLength = 0;
+          } 
+          // 如果超过限制，创建一个block
+          else if (currentChunk.length >= maxLinesPerBlock || 
+                   currentChunkLength + trimmedLine.length > maxCharsPerBlock) {
+            if (currentChunk.length > 0) {
+              blocks.push({
+                object: 'block',
+                type: 'paragraph',
+                paragraph: {
+                  rich_text: [{ 
+                    type: 'text', 
+                    text: { 
+                      content: currentChunk.join('\n') 
+                    }
+                  }]
+                }
+              });
+            }
+            currentChunk = trimmedLine ? [trimmedLine] : [];
+            currentChunkLength = trimmedLine.length;
+          } 
+          // 添加到当前chunk
+          else if (trimmedLine) {
+            currentChunk.push(trimmedLine);
+            currentChunkLength += trimmedLine.length;
           }
         });
+        
+        // 添加最后的chunk
+        if (currentChunk.length > 0) {
+          blocks.push({
+            object: 'block',
+            type: 'paragraph',
+            paragraph: {
+              rich_text: [{ 
+                type: 'text', 
+                text: { 
+                  content: currentChunk.join('\n') 
+                }
+              }]
+            }
+          });
+        }
       }
 
       // 添加时间戳段落
@@ -631,7 +680,11 @@ class NotionService {
           }
         });
 
-        summary.segments.forEach(segment => {
+        // 限制时间戳段落数量，避免blocks过多
+        const maxSegments = 20; // 最多显示20个时间戳段落
+        const segmentsToAdd = summary.segments.slice(0, maxSegments);
+        
+        segmentsToAdd.forEach(segment => {
           if (segment && typeof segment === 'object') {
             // 确保所有字段都是有效的字符串
             const timestamp = String(segment.timestamp || '00:00');
@@ -656,6 +709,23 @@ class NotionService {
             }
           }
         });
+        
+        // 如果段落被截断，添加提示
+        if (summary.segments.length > maxSegments) {
+          blocks.push({
+            object: 'block',
+            type: 'paragraph',
+            paragraph: {
+              rich_text: [{ 
+                type: 'text', 
+                text: { 
+                  content: `... 还有 ${summary.segments.length - maxSegments} 个时间戳段落未显示`
+                },
+                annotations: { italic: true }
+              }]
+            }
+          });
+        }
       }
 
       // 验证所有blocks都有正确的结构
@@ -827,6 +897,34 @@ class NotionService {
         language: 'plain text'
       }
     });
+
+    // 检查并限制blocks数量不超过100个（Notion API限制）
+    if (children.length > 100) {
+      logger.warn('[NotionService] blocks数量超过100个，进行截断', children.length);
+      // 保留前95个blocks，然后添加一个提示
+      const truncatedChildren = children.slice(0, 95);
+      truncatedChildren.push({
+        object: 'block',
+        type: 'divider',
+        divider: {}
+      });
+      truncatedChildren.push({
+        object: 'block',
+        type: 'callout',
+        callout: {
+          rich_text: [{ 
+            type: 'text', 
+            text: { 
+              content: `⚠️ 内容被截断：原始内容包含 ${children.length} 个blocks，超过了Notion API的100个blocks限制。` 
+            }
+          }],
+          icon: {
+            emoji: '⚠️'
+          }
+        }
+      });
+      return truncatedChildren;
+    }
 
     return children;
   }

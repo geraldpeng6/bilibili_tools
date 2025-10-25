@@ -143,7 +143,14 @@ class BilibiliSubtitleExtractor {
     speedControlService.init();
 
     if (this.isBilibili) {
-      await sponsorBlockService.init();
+      // SponsorBlock 初始化（非关键功能，错误不影响主流程）
+      try {
+        await sponsorBlockService.init();
+      } catch (error) {
+        logger.warn('Main', 'SponsorBlock 初始化失败:', error.message);
+      }
+      
+      // 视频质量徽章服务
       this.videoQualityService = createVideoQualityService(sponsorBlockService.getAPI());
       this.videoQualityService.start();
     }

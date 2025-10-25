@@ -38,10 +38,10 @@ class AIService {
   }
 
   /**
-   * 生成AI总结（两次独立请求）
+   * 生成AI总结（三次独立请求）
    * @param {Array} subtitleData - 字幕数据
    * @param {boolean} isAuto - 是否自动触发
-   * @returns {Promise<{markdown: string, segments: Array}>}
+   * @returns {Promise<{markdown: string, segments: Array, ads: Array}>}
    */
   async summarize(subtitleData, isAuto = false) {
     // 检查是否正在总结
@@ -96,30 +96,60 @@ class AIService {
           headers['X-Title'] = 'Bilibili Subtitle Extractor';
         }
 
-        // 并行执行两个独立的AI请求
-        const [markdownSummary, jsonSegments] = await Promise.all([
+        // 检查是否需要广告检测
+        const videoInfo = state.getVideoInfo();
+        const videoDuration = document.querySelector('video')?.duration || 0;
+        const shouldDetectAds = videoDuration > 300; // 超过5分钟的视频才检测广告
+
+        // 准备请求数组
+        const aiRequests = [
           // 第一个请求：Markdown格式总结（使用纯字幕文本）
           this._makeAIRequest(aiConfig, headers, pureSubtitleText, aiConfig.prompt1 || this._getDefaultPrompt1(), 'markdown'),
           // 第二个请求：JSON格式段落（使用带时间戳的字幕文本）
           this._makeAIRequest(aiConfig, headers, timestampedSubtitleText, aiConfig.prompt2 || this._getDefaultPrompt2(), 'json')
-        ]);
+        ];
 
+        // 如果需要，添加广告检测请求
+        if (shouldDetectAds) {
+          aiRequests.push(
+            // 第三个请求：广告检测（使用带时间戳的字幕文本）
+            this._makeAIRequest(aiConfig, headers, timestampedSubtitleText, this._getAdDetectionPrompt(), 'ads')
+          );
+        }
+
+        // 并行执行所有AI请求
+        const results = await Promise.all(aiRequests);
+        
         // 组合结果
         const combinedResult = {
-          markdown: markdownSummary,
-          segments: jsonSegments
+          markdown: results[0],
+          segments: results[1],
+          ads: shouldDetectAds ? results[2] : []
         };
         
+        // 验证两个AI总结是否都成功
+        if (!combinedResult.markdown || !combinedResult.segments) {
+          throw new Error('AI总结不完整：markdown或segments缺失');
+        }
+        
         // 调试日志
-        logger.debug('AIService', '总结完成，段落数量:', jsonSegments?.length || 0);
-        if (!jsonSegments || jsonSegments.length === 0) {
-          logger.warn('AIService', '没有生成段落总结，请检查AI返回内容');
+        logger.debug('AIService', 'Markdown总结长度:', combinedResult.markdown?.length || 0);
+        logger.debug('AIService', '段落数量:', combinedResult.segments?.length || 0);
+        
+        if (combinedResult.segments.length === 0) {
+          logger.warn('AIService', '段落总结为空，请检查AI返回内容');
+        }
+        
+        if (combinedResult.ads && combinedResult.ads.length > 0) {
+          logger.info('AIService', '检测到广告段落:', combinedResult.ads.length);
+          // 将广告段落添加到进度条标记
+          this._applyAdSegments(combinedResult.ads);
         }
 
         // 完成总结
         state.finishAISummary(combinedResult);
         
-        // 自动保存AI总结到笔记
+        // 只有两个AI总结都成功才保存到笔记
         try {
           const videoInfo = state.getVideoInfo();
           const summaryNote = notesService.addAISummary({
@@ -128,9 +158,9 @@ class AIService {
             videoInfo: videoInfo,
             videoBvid: videoInfo?.bvid
           });
-          logger.debug('AIService', '✓ AI总结已保存到笔记，笔记ID:', summaryNote.id);
+          logger.info('AIService', '✅ 两个AI总结都成功，已保存到笔记，笔记ID:', summaryNote.id);
         } catch (error) {
-          logger.warn('AIService', '保存AI总结到笔记失败:', error);
+          logger.error('AIService', '保存AI总结到笔记失败:', error);
         }
         
         // 如果配置了Notion且有页面，自动发送AI总结
@@ -199,7 +229,7 @@ class AIService {
       // 清理markdown内容：如果被代码块包裹，提取出来
       return this._cleanMarkdownContent(markdownContent);
     } else {
-      // JSON请求使用非流式响应
+      // JSON和广告检测请求使用非流式响应
       const response = await fetch(aiConfig.url, {
         method: 'POST',
         headers: headers,
@@ -209,15 +239,19 @@ class AIService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('[AIService] JSON API错误响应:', errorText);
-        throw new Error(`JSON请求失败: ${response.status} ${response.statusText}`);
+        console.error(`[AIService] ${type} API错误响应:`, errorText);
+        throw new Error(`${type}请求失败: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
       const content = data.choices?.[0]?.message?.content || '';
       
-      // 解析JSON响应
-      return this._parseJSONResponse(content);
+      // 根据类型解析响应
+      if (type === 'json') {
+        return this._parseJSONResponse(content);
+      } else if (type === 'ads') {
+        return this._parseAdResponse(content);
+      }
     }
   }
 
@@ -448,6 +482,146 @@ JSON格式要求：
 
 字幕内容：
 `;
+  }
+
+  /**
+   * 获取广告检测的提示词
+   * @private
+   * @returns {string}
+   */
+  _getAdDetectionPrompt() {
+    return `分析以下视频字幕，识别是否存在对特定产品或品牌的硬性广告推广介绍。
+
+判断标准：
+1. 明确提及产品名称、品牌或服务
+2. 包含推广性描述（如功能介绍、优惠信息、购买链接等）
+3. 明显的商业推广意图
+
+如果没有检测到广告，返回：
+{"hasAds":false,"segments":[]}
+
+如果检测到广告，返回广告时间段，格式为：
+{"hasAds":true,"segments":[{"start":"分钟:秒","end":"分钟:秒","product":"产品名称","description":"广告内容简述"}]}
+
+示例：
+{"hasAds":true,"segments":[{"start":"02:15","end":"03:45","product":"某品牌手机","description":"介绍手机功能和购买优惠"}]}
+
+重要：只返回JSON格式，不要有其他文字。
+
+字幕内容：
+`;
+  }
+
+  /**
+   * 解析广告检测响应
+   * @private
+   * @param {string} content - AI返回的内容
+   * @returns {Array} 解析后的广告段落数组
+   */
+  _parseAdResponse(content) {
+    logger.debug('AIService', '解析广告检测响应，原始内容长度:', content?.length || 0);
+    
+    try {
+      // 清理内容
+      let cleanContent = content.trim();
+      
+      // 如果内容被包裹在代码块中，提取出来
+      if (cleanContent.includes('```json')) {
+        const match = cleanContent.match(/```json\s*([\s\S]*?)```/);
+        if (match) {
+          cleanContent = match[1].trim();
+        }
+      } else if (cleanContent.includes('```')) {
+        const match = cleanContent.match(/```\s*([\s\S]*?)```/);
+        if (match) {
+          cleanContent = match[1].trim();
+        }
+      }
+      
+      // 尝试提取JSON部分
+      const jsonMatch = cleanContent.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const json = JSON.parse(jsonMatch[0]);
+        
+        if (json.hasAds && Array.isArray(json.segments)) {
+          logger.info('AIService', '检测到广告段落:', json.segments.length);
+          // 转换时间格式为秒数
+          return json.segments.map(segment => {
+            const startTime = this._parseTimeToSeconds(segment.start);
+            const endTime = this._parseTimeToSeconds(segment.end);
+            return {
+              segment: [startTime, endTime],
+              category: 'sponsor', // 使用sponsor类别
+              product: segment.product,
+              description: segment.description
+            };
+          });
+        }
+      }
+    } catch (e) {
+      logger.warn('AIService', '广告检测解析失败:', e);
+    }
+    
+    return [];
+  }
+
+  /**
+   * 将时间字符串转换为秒数
+   * @private
+   * @param {string} timeStr - 时间字符串 (MM:SS 或 HH:MM:SS)
+   * @returns {number} 秒数
+   */
+  _parseTimeToSeconds(timeStr) {
+    if (!timeStr) return 0;
+    
+    const parts = timeStr.split(':').map(p => parseInt(p));
+    if (parts.length === 2) {
+      // MM:SS
+      return parts[0] * 60 + parts[1];
+    } else if (parts.length === 3) {
+      // HH:MM:SS
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+    return 0;
+  }
+
+  /**
+   * 应用广告段落到进度条标记
+   * @private
+   * @param {Array} adSegments - 广告段落数组
+   */
+  async _applyAdSegments(adSegments) {
+    if (!adSegments || adSegments.length === 0) return;
+    
+    try {
+      // 获取SponsorBlock服务实例
+      const sponsorBlockService = (await import('./SponsorBlockService.js')).default;
+      
+      // 添加广告段落到标记系统
+      if (sponsorBlockService.playerController) {
+        // 将广告段落添加到现有段落
+        const existingSegments = sponsorBlockService.playerController.segments || [];
+        const combinedSegments = [
+          ...existingSegments,
+          ...adSegments.map((ad, index) => ({
+            UUID: `ai-ad-${index}`,
+            segment: ad.segment,
+            category: 'sponsor',
+            votes: 100, // 给予较高的优先级
+            videoDuration: 0,
+            description: `${ad.product}: ${ad.description}`
+          }))
+        ];
+        
+        sponsorBlockService.playerController.segments = combinedSegments;
+        // 重新渲染进度条标记
+        sponsorBlockService.playerController.renderProgressMarkers();
+        
+        logger.info('AIService', '已将广告段落添加到进度条标记');
+      }
+    } catch (error) {
+      logger.warn('AIService', '添加广告段落到标记失败:', error);
+    }
   }
 
   /**
