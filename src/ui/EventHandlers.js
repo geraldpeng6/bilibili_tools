@@ -247,8 +247,14 @@ class EventHandlers {
           const videoKey = state.getVideoKey();
           const aiSummary = videoKey ? state.getAISummary(videoKey) : null;
           
-          // 发送完整内容（包括AI总结和字幕）
-          await notionService.sendComplete(subtitleData, aiSummary, videoInfo);
+          // 获取内容配置选项
+          const contentOptions = config.getNotionContentOptions();
+          
+          // 根据配置决定是否发送字幕
+          const subtitleToSend = contentOptions.subtitles ? subtitleData : null;
+          
+          // 发送内容（根据配置）
+          await notionService.sendComplete(subtitleToSend, aiSummary, videoInfo);
         } catch (error) {
           notification.handleError(error, 'Notion发送');
         }

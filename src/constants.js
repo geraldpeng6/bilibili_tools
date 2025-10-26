@@ -48,6 +48,7 @@ export const BALL_STATUS = {
   ACTIVE: 'active',                   // 有字幕，可点击
   NO_SUBTITLE: 'no-subtitle',         // 无字幕
   ERROR: 'error',                     // 错误
+  AI_SUMMARIZING: 'ai-summarizing',   // AI总结中
 };
 
 // ==================== 事件类型 ====================
@@ -81,12 +82,10 @@ export const EVENTS = {
 const DEFAULT_PROMPT_1 = `请用中文总结以下视频字幕内容，使用Markdown格式输出。
 
 要求：
-1. 第一行使用 # 标题，简洁概括视频主题
-2. 第二部分使用 ## TL;DR 作为标题，提供2-3句话的核心摘要
-3. 第三部分使用 --- 分隔线
-4. 后续内容按主题使用 ### 三级标题分段
-5. 使用项目符号 - 列出要点
-6. 直接输出Markdown内容，不要使用代码块包裹（不要使用\`\`\`）
+1. 在开头提供TL;DR（不超过50字的核心摘要）
+2. 使用标题、列表等Markdown格式组织内容
+3. 突出关键信息和要点
+4. 带时间戳，表示哪部分讲什么内容
 
 字幕内容：
 `;

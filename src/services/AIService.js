@@ -103,19 +103,20 @@ class AIService {
         const videoUrl = getVideoUrl();
         const bvid = videoInfo?.bvid;
         
-        // 如果是手动触发，清除该视频的处理记录
-        if (isManual && bvid) {
-          taskManager.clearVideoProcessed(bvid);
-        }
-        
         // 创建任务上下文，固定视频信息
         const taskVideoInfo = {
           bvid,
           cid: videoInfo?.cid,
           aid: videoInfo?.aid,
+          p: videoInfo?.p || 1,  // 确保包含分P信息
           title: videoTitle,
           url: videoUrl
         };
+        
+        // 如果是手动触发，清除该视频的处理记录
+        if (isManual && videoInfo) {
+          taskManager.clearVideoProcessed(taskVideoInfo);
+        }
         
         // 创建任务
         const taskId = taskManager.createTask(
@@ -254,14 +255,15 @@ class AIService {
             'notion_send_summary',
             videoInfo,
             async (notionTaskContext) => {
-              // 获取字幕数据
-              const subtitleData = state.getSubtitleData();
+              // 获取配置选项
+              const contentOptions = config.getNotionContentOptions();
+              // 获取字幕数据（如果配置了要发送字幕）
+              const subtitleData = contentOptions.subtitles ? state.getSubtitleData() : null;
               
-              // 使用统一的sendToNotion方法
               await notionService.sendToNotion({
                 videoInfo: notionTaskContext.videoInfo,
                 aiSummary: combinedResult,
-                subtitleData: subtitleData,
+                subtitleData: subtitleData, // 根据配置决定是否发送字幕
                 isAuto: true
               });
             },

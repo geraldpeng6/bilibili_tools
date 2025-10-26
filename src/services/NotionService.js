@@ -10,6 +10,7 @@ import logger from '../utils/DebugLogger.js';
 import notification from '../ui/Notification.js';
 import { EVENTS, API, LIMITS } from '../constants.js';
 import { getVideoTitle, getVideoUrl, getVideoCreator, formatTime } from '../utils/helpers.js';
+import { generateCacheKey } from '../utils/validators.js';
 
 class NotionService {
   /**
@@ -127,10 +128,13 @@ class NotionService {
       const properties = this._buildProperties(schema, videoInfo, videoTitle, videoUrl, creator, [], null);
 
       // 创建或更新主页面
-      let mainPageId = state.getNotionPageId(bvid);
-      if (!mainPageId) {
+      const videoKey = generateCacheKey(videoInfo);
+      let mainPageId = state.getNotionPageId(videoKey);
+      const isNewPage = !mainPageId;
+      
+      if (isNewPage) {
         mainPageId = await this._createPage(notionConfig.apiKey, databaseId, properties, mainPageChildren);
-        state.setNotionPageId(bvid, mainPageId);
+        state.setNotionPageId(videoKey, mainPageId);
         logger.info('[NotionService] ✓ 主页面创建成功');
       } else {
         // 更新现有页面
@@ -138,8 +142,9 @@ class NotionService {
         logger.info('[NotionService] ✓ 主页面更新成功');
       }
 
-      // 创建字幕子页面
-      if (contentOptions.subtitles && subtitleData && subtitleData.length > 0) {
+      // 只在第一次创建页面时处理字幕
+      // 更新页面时（AI总结完成）不处理字幕，避免重复
+      if (isNewPage && contentOptions.subtitles && subtitleData && subtitleData.length > 0) {
         const subtitlePageContent = this._formatSubtitleContent(subtitleData);
         const subtitlePageId = await this._createSubtitlePage(
           notionConfig.apiKey, 
@@ -168,7 +173,7 @@ class NotionService {
           }
         });
         
-        // 添加子页面链接（Notion的块引用方式）
+        // 添加子页面链接
         subtitleBlocks.push({
           object: 'block',
           type: 'paragraph',
@@ -262,22 +267,26 @@ class NotionService {
 
 
   /**
-   * 查询数据库中的视频页面
+   * 查询视频对应的Notion页面
    * @param {string} apiKey - API Key  
    * @param {string} databaseId - 数据库ID
    * @param {string} bvid - 视频BV号
+   * @param {number} p - 分P号（默认为1）
    * @returns {Promise<string|null>} - 返回页面ID或null
    */
-  async queryVideoPage(apiKey, databaseId, bvid) {
+  async queryVideoPage(apiKey, databaseId, bvid, p = 1) {
     if (!apiKey || !databaseId || !bvid) {
       return null;
     }
 
+    // 构建查询字符串，包含分P信息
+    const searchStr = p > 1 ? `${bvid} P${p}` : bvid;
+    
     const queryData = {
       filter: {
         property: 'BV号',
         rich_text: {
-          contains: bvid
+          contains: searchStr
         }
       },
       sorts: [
@@ -616,12 +625,15 @@ class NotionService {
     }
 
     // 获取页面ID（从缓存或查询）
-    let pageId = state.getNotionPageId(bvid);
+    const videoKey = generateCacheKey(videoInfo);
+    let pageId = state.getNotionPageId(videoKey);
     
     if (!pageId && notionConfig.databaseId) {
-      pageId = await this.queryVideoPage(notionConfig.apiKey, notionConfig.databaseId, bvid);
+      // 查询时需要同时匹配BV号和分P
+      const p = videoInfo.p || 1;
+      pageId = await this.queryVideoPage(notionConfig.apiKey, notionConfig.databaseId, bvid, p);
       if (pageId) {
-        state.setNotionPageId(bvid, pageId);
+        state.setNotionPageId(videoKey, pageId);
       }
     }
 
@@ -725,78 +737,9 @@ class NotionService {
 
       // 添加Markdown总结
       if (summary && summary.markdown) {
-        // 确保markdown是字符串
         const markdownContent = String(summary.markdown || '');
-        // 将markdown内容分块，每块最多包含10行或1500字符
-        const markdownLines = markdownContent.split('\n').filter(line => line !== undefined && line !== null);
-        
-        let currentChunk = [];
-        let currentChunkLength = 0;
-        const maxLinesPerBlock = 10;
-        const maxCharsPerBlock = 1500;
-        
-        markdownLines.forEach((line, index) => {
-          const trimmedLine = String(line || '').trim();
-          
-          // 如果是空行且当前chunk有内容，则创建一个block并重新开始
-          if (!trimmedLine && currentChunk.length > 0) {
-            blocks.push({
-              object: 'block',
-              type: 'paragraph',
-              paragraph: {
-                rich_text: [{ 
-                  type: 'text', 
-                  text: { 
-                    content: currentChunk.join('\n') 
-                  }
-                }]
-              }
-            });
-            currentChunk = [];
-            currentChunkLength = 0;
-          } 
-          // 如果超过限制，创建一个block
-          else if (currentChunk.length >= maxLinesPerBlock || 
-                   currentChunkLength + trimmedLine.length > maxCharsPerBlock) {
-            if (currentChunk.length > 0) {
-              blocks.push({
-                object: 'block',
-                type: 'paragraph',
-                paragraph: {
-                  rich_text: [{ 
-                    type: 'text', 
-                    text: { 
-                      content: currentChunk.join('\n') 
-                    }
-                  }]
-                }
-              });
-            }
-            currentChunk = trimmedLine ? [trimmedLine] : [];
-            currentChunkLength = trimmedLine.length;
-          } 
-          // 添加到当前chunk
-          else if (trimmedLine) {
-            currentChunk.push(trimmedLine);
-            currentChunkLength += trimmedLine.length;
-          }
-        });
-        
-        // 添加最后的chunk
-        if (currentChunk.length > 0) {
-          blocks.push({
-            object: 'block',
-            type: 'paragraph',
-            paragraph: {
-              rich_text: [{ 
-                type: 'text', 
-                text: { 
-                  content: currentChunk.join('\n') 
-                }
-              }]
-            }
-          });
-        }
+        const markdownBlocks = this._convertMarkdownToNotionBlocks(markdownContent);
+        blocks.push(...markdownBlocks);
       }
 
       // 添加时间戳段落
@@ -939,145 +882,6 @@ class NotionService {
   }
 
   /**
-   * 构建页面内容
-   * @private
-   * @param {Object} videoInfo - 视频信息
-   * @param {string} videoTitle - 视频标题
-   * @param {string} videoUrl - 视频URL
-   * @param {Array} subtitleData - 字幕数据
-   * @param {Object} aiSummary - AI总结（可选）{markdown, segments}
-   * @returns {Array}
-   */
-  _buildPageContent(videoInfo, videoTitle, videoUrl, subtitleData, aiSummary = null) {
-    const children = [
-      {
-        object: 'block',
-        type: 'heading_2',
-        heading_2: {
-          rich_text: [{ type: 'text', text: { content: '📹 视频信息' } }]
-        }
-      },
-      {
-        object: 'block',
-        type: 'paragraph',
-        paragraph: {
-          rich_text: [{ type: 'text', text: { content: `视频标题：${videoTitle}` } }]
-        }
-      },
-      {
-        object: 'block',
-        type: 'paragraph',
-        paragraph: {
-          rich_text: [{ type: 'text', text: { content: `BV号：${videoInfo.bvid}` } }]
-        }
-      },
-      {
-        object: 'block',
-        type: 'paragraph',
-        paragraph: {
-          rich_text: [{ type: 'text', text: { content: `视频链接：${videoUrl}` } }]
-        }
-      },
-      {
-        object: 'block',
-        type: 'paragraph',
-        paragraph: {
-          rich_text: [{ type: 'text', text: { content: `字幕总数：${subtitleData.length} 条` } }]
-        }
-      },
-      {
-        object: 'block',
-        type: 'divider',
-        divider: {}
-      }
-    ];
-
-    // 如果有AI总结，在字幕内容之前插入
-    if (aiSummary && (aiSummary.markdown || aiSummary.segments)) {
-      const aiBlocks = this._buildAISummaryBlocks(aiSummary);
-      children.push(...aiBlocks);
-    }
-
-    // 添加字幕内容标题
-    children.push({
-      object: 'block',
-      type: 'heading_2',
-      heading_2: {
-        rich_text: [{ type: 'text', text: { content: '📝 字幕内容' } }]
-      }
-    });
-
-    // 构建字幕rich_text数组
-    const subtitleRichTextArray = [];
-    let currentText = '';
-    const maxTextLength = LIMITS.NOTION_TEXT_CHUNK;
-
-    for (let item of subtitleData) {
-      const line = `${item.content}\n`;
-
-      if (currentText.length + line.length > maxTextLength) {
-        if (currentText) {
-          subtitleRichTextArray.push({
-            type: 'text',
-            text: { content: currentText }
-          });
-        }
-        currentText = line;
-      } else {
-        currentText += line;
-      }
-    }
-
-    // 添加最后一段
-    if (currentText) {
-      subtitleRichTextArray.push({
-        type: 'text',
-        text: { content: currentText }
-      });
-    }
-
-    // 添加字幕代码块
-    children.push({
-      object: 'block',
-      type: 'code',
-      code: {
-        rich_text: subtitleRichTextArray,
-        language: 'plain text'
-      }
-    });
-
-    // 检查并限制blocks数量不超过100个（Notion API限制）
-    if (children.length > 100) {
-      logger.warn('[NotionService] blocks数量超过100个，进行截断', children.length);
-      // 保留前95个blocks，然后添加一个提示
-      const truncatedChildren = children.slice(0, 95);
-      truncatedChildren.push({
-        object: 'block',
-        type: 'divider',
-        divider: {}
-      });
-      truncatedChildren.push({
-        object: 'block',
-        type: 'callout',
-        callout: {
-          rich_text: [{ 
-            type: 'text', 
-            text: { 
-              content: `⚠️ 内容被截断：原始内容包含 ${children.length} 个blocks，超过了Notion API的100个blocks限制。` 
-            }
-          }],
-          icon: {
-            emoji: '⚠️'
-          }
-        }
-      });
-      return truncatedChildren;
-    }
-
-    return children;
-  }
-
-  /**
    * 构建Notion页面的Properties
    * @private
    * @param {Object} schema - 数据库schema
@@ -1095,8 +899,11 @@ class NotionService {
     // 查找title类型的字段（必须存在）
     const titleField = Object.keys(schema).find(key => schema[key].type === 'title');
     if (titleField) {
+      // 对于多P视频，在标题后添加分P信息
+      const p = videoInfo.p || 1;
+      const displayTitle = p > 1 ? `${videoTitle} - P${p}` : videoTitle;
       properties[titleField] = {
-        title: [{ text: { content: videoTitle } }]
+        title: [{ text: { content: displayTitle } }]
       };
     }
 
@@ -1107,8 +914,32 @@ class NotionService {
 
       // BV号字段
       if (lowerFieldName.includes('bv') && (fieldType === 'rich_text' || fieldType === 'text')) {
+        // 包含分P信息的BV号
+        const p = videoInfo.p || 1;
+        const bvWithP = p > 1 ? `${videoInfo.bvid || ''} P${p}` : (videoInfo.bvid || '');
         properties[fieldName] = {
-          rich_text: [{ type: 'text', text: { content: videoInfo.bvid || '' } }]
+          rich_text: [{ type: 'text', text: { content: bvWithP } }]
+        };
+      }
+      
+      // 分P字段（如果数据库有单独的分P字段）
+      if ((lowerFieldName.includes('分p') || lowerFieldName.includes('集数') || 
+           lowerFieldName.includes('part') || lowerFieldName.includes('episode') ||
+           lowerFieldName === 'p') && 
+          fieldType === 'number') {
+        properties[fieldName] = {
+          number: videoInfo.p || 1
+        };
+      }
+      
+      // 分P字段（文本类型）
+      if ((lowerFieldName.includes('分p') || lowerFieldName.includes('集数') || 
+           lowerFieldName.includes('part') || lowerFieldName.includes('episode') ||
+           lowerFieldName === 'p') && 
+          (fieldType === 'rich_text' || fieldType === 'text')) {
+        const p = videoInfo.p || 1;
+        properties[fieldName] = {
+          rich_text: [{ type: 'text', text: { content: `P${p}` } }]
         };
       }
 
@@ -1210,7 +1041,8 @@ class NotionService {
       const bvid = videoInfo?.bvid;
 
       // 获取或创建主页面
-      let mainPageId = state.getNotionPageId(bvid);
+      const videoKey = generateCacheKey(videoInfo);
+      let mainPageId = state.getNotionPageId(videoKey);
       
       if (!mainPageId) {
         // 先创建主页面（只包含视频信息和时间戳段落）
@@ -1250,7 +1082,7 @@ class NotionService {
         const properties = this._buildProperties(schema, videoInfo, videoTitle, videoUrl, creator, [], null); // 不添加summary到字段
 
         mainPageId = await this._createPage(notionConfig.apiKey, databaseId, properties, mainPageChildren);
-        state.setNotionPageId(bvid, mainPageId);
+        state.setNotionPageId(videoKey, mainPageId);
         logger.info('[NotionService] ✓ 主页面创建成功');
         
         // 创建页面后，再追加时间戳段落（避免初始创建时超过100个块的限制）
@@ -1359,7 +1191,7 @@ class NotionService {
   }
 
   /**
-   * 将Markdown文本转换为Notion blocks（优化版）
+   * 将Markdown文本转换为Notion blocks
    * @private
    * @param {string} markdown - Markdown文本
    * @returns {Array} Notion blocks数组
@@ -1367,138 +1199,484 @@ class NotionService {
   _convertMarkdownToNotionBlocks(markdown) {
     const blocks = [];
     const lines = markdown.split('\n');
-    
-    logger.debug('[NotionService] 开始转换Markdown，共', lines.length, '行');
-    
-    let consecutiveParagraphs = [];
-    
-    const flushParagraphs = () => {
-      if (consecutiveParagraphs.length > 0) {
-        // 合并连续的普通段落为一个paragraph，用换行分隔
-        const combinedText = consecutiveParagraphs.join('\n');
-        blocks.push({
-          object: 'block',
-          type: 'paragraph',
-          paragraph: {
-            rich_text: this._parseRichText(combinedText)
-          }
-        });
-        consecutiveParagraphs = [];
-      }
-    };
-    
-    for (let i = 0; i < lines.length; i++) {
+    let currentCodeBlock = null;
+    let currentList = [];
+    let currentListType = null;
+    let i = 0;
+
+    while (i < lines.length) {
       const line = lines[i];
       const trimmedLine = line.trim();
-      
-      // 跳过空行
+
+      // 空行
       if (!trimmedLine) {
+        // 如果当前有列表，先结束列表
+        if (currentList.length > 0) {
+          blocks.push(...currentList);
+          currentList = [];
+          currentListType = null;
+        }
+        i++;
         continue;
       }
-      
-      // 分隔线
-      if (trimmedLine === '---' || trimmedLine === '***' || trimmedLine === '___') {
-        flushParagraphs();
+
+      // 代码块开始/结束
+      if (trimmedLine.startsWith('```')) {
+        if (currentCodeBlock === null) {
+          // 开始代码块
+          const language = trimmedLine.slice(3).trim() || 'plain text';
+          currentCodeBlock = {
+            language,
+            content: []
+          };
+        } else {
+          // 结束代码块，创建code block
+          if (currentCodeBlock.content.length > 0) {
+            blocks.push({
+              object: 'block',
+              type: 'code',
+              code: {
+                rich_text: [{
+                  type: 'text',
+                  text: {
+                    content: currentCodeBlock.content.join('\n')
+                  }
+                }],
+                language: this._normalizeLanguage(currentCodeBlock.language)
+              }
+            });
+          }
+          currentCodeBlock = null;
+        }
+        i++;
+        continue;
+      }
+
+      // 如果在代码块中，添加到代码内容
+      if (currentCodeBlock !== null) {
+        currentCodeBlock.content.push(line);
+        i++;
+        continue;
+      }
+
+      // 分隔线 (---, ___, ***)
+      if (/^(-{3,}|_{3,}|\*{3,})$/.test(trimmedLine)) {
+        // 先结束当前列表
+        if (currentList.length > 0) {
+          blocks.push(...currentList);
+          currentList = [];
+          currentListType = null;
+        }
         blocks.push({
           object: 'block',
           type: 'divider',
           divider: {}
         });
+        i++;
         continue;
       }
-      
-      // 标题检测（优化：使用正则，支持标题后有多余空格）
-      const headingMatch = trimmedLine.match(/^(#{1,3})\s+(.+)$/);
+
+      // 标题 (# ## ### #### ##### ######)
+      const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
       if (headingMatch) {
-        flushParagraphs();
+        // 先结束当前列表
+        if (currentList.length > 0) {
+          blocks.push(...currentList);
+          currentList = [];
+          currentListType = null;
+        }
+
         const level = headingMatch[1].length;
-        const text = headingMatch[2].trim();
-        const headingType = `heading_${level}`;
+        const content = headingMatch[2].trim();
+        const headingType = level <= 3 ? `heading_${level}` : 'heading_3'; // Notion只支持3级标题
         
         blocks.push({
           object: 'block',
           type: headingType,
           [headingType]: {
-            rich_text: this._parseRichText(text)
+            rich_text: this._parseInlineMarkdown(content)
           }
         });
+        i++;
         continue;
       }
-      
-      // 无序列表: - item 或 * item
-      if (trimmedLine.match(/^[-*]\s+/)) {
-        flushParagraphs();
-        const text = trimmedLine.substring(2).trim();
-        blocks.push({
-          object: 'block',
-          type: 'bulleted_list_item',
-          bulleted_list_item: {
-            rich_text: this._parseRichText(text)
-          }
-        });
-        continue;
-      }
-      
-      // 有序列表: 1. item
-      const numberedMatch = trimmedLine.match(/^(\d+)\.\s+(.+)$/);
-      if (numberedMatch) {
-        flushParagraphs();
-        const text = numberedMatch[2].trim();
-        blocks.push({
-          object: 'block',
-          type: 'numbered_list_item',
-          numbered_list_item: {
-            rich_text: this._parseRichText(text)
-          }
-        });
-        continue;
-      }
-      
-      // 引用: > text
-      if (trimmedLine.startsWith('> ')) {
-        flushParagraphs();
-        const text = trimmedLine.substring(2).trim();
+
+      // 引用 (>)
+      if (trimmedLine.startsWith('>')) {
+        // 先结束当前列表
+        if (currentList.length > 0) {
+          blocks.push(...currentList);
+          currentList = [];
+          currentListType = null;
+        }
+
+        let quoteContent = trimmedLine.slice(1).trim();
+        // 收集连续的引用行
+        while (i + 1 < lines.length && lines[i + 1].trim().startsWith('>')) {
+          i++;
+          quoteContent += '\n' + lines[i].trim().slice(1).trim();
+        }
+        
         blocks.push({
           object: 'block',
           type: 'quote',
           quote: {
-            rich_text: this._parseRichText(text)
+            rich_text: this._parseInlineMarkdown(quoteContent)
           }
         });
+        i++;
         continue;
       }
-      
-      // 代码块: ```
-      if (trimmedLine.startsWith('```')) {
-        flushParagraphs();
-        const codeLines = [];
-        i++; // 跳过开始的```
-        while (i < lines.length && !lines[i].trim().startsWith('```')) {
-          codeLines.push(lines[i]);
-          i++;
+
+      // 无序列表 (-, *, +)
+      if (/^[-*+]\s+/.test(trimmedLine)) {
+        const content = trimmedLine.replace(/^[-*+]\s+/, '').trim();
+        const listBlock = {
+          object: 'block',
+          type: 'bulleted_list_item',
+          bulleted_list_item: {
+            rich_text: this._parseInlineMarkdown(content)
+          }
+        };
+
+        if (currentListType === 'bulleted') {
+          currentList.push(listBlock);
+        } else {
+          // 先输出之前的列表
+          if (currentList.length > 0) {
+            blocks.push(...currentList);
+          }
+          currentList = [listBlock];
+          currentListType = 'bulleted';
         }
+        i++;
+        continue;
+      }
+
+      // 有序列表 (1. 2. 3.)
+      if (/^\d+\.\s+/.test(trimmedLine)) {
+        const content = trimmedLine.replace(/^\d+\.\s+/, '').trim();
+        const listBlock = {
+          object: 'block',
+          type: 'numbered_list_item',
+          numbered_list_item: {
+            rich_text: this._parseInlineMarkdown(content)
+          }
+        };
+
+        if (currentListType === 'numbered') {
+          currentList.push(listBlock);
+        } else {
+          // 先输出之前的列表
+          if (currentList.length > 0) {
+            blocks.push(...currentList);
+          }
+          currentList = [listBlock];
+          currentListType = 'numbered';
+        }
+        i++;
+        continue;
+      }
+
+      // 任务列表 (- [ ] 或 - [x])
+      const todoMatch = trimmedLine.match(/^-\s+\[([ x])\]\s+(.+)$/);
+      if (todoMatch) {
+        // 先结束当前列表
+        if (currentList.length > 0 && currentListType !== 'todo') {
+          blocks.push(...currentList);
+          currentList = [];
+          currentListType = null;
+        }
+        
         blocks.push({
           object: 'block',
-          type: 'code',
-          code: {
-            rich_text: [{ type: 'text', text: { content: codeLines.join('\n') } }],
-            language: 'plain text'
+          type: 'to_do',
+          to_do: {
+            rich_text: this._parseInlineMarkdown(todoMatch[2]),
+            checked: todoMatch[1] === 'x'
           }
         });
+        i++;
         continue;
       }
-      
-      // 普通段落 - 累积起来
-      consecutiveParagraphs.push(trimmedLine);
+
+      // 普通段落
+      // 先结束当前列表
+      if (currentList.length > 0) {
+        blocks.push(...currentList);
+        currentList = [];
+        currentListType = null;
+      }
+
+      // 收集连续的非特殊格式行作为一个段落
+      let paragraphContent = trimmedLine;
+      while (i + 1 < lines.length) {
+        const nextLine = lines[i + 1].trim();
+        // 如果下一行是空行或特殊格式，停止收集
+        if (!nextLine || 
+            nextLine.startsWith('#') || 
+            nextLine.startsWith('>') || 
+            /^[-*+]\s+/.test(nextLine) || 
+            /^\d+\.\s+/.test(nextLine) ||
+            nextLine.startsWith('```') ||
+            /^(-{3,}|_{3,}|\*{3,})$/.test(nextLine)) {
+          break;
+        }
+        i++;
+        paragraphContent += ' ' + nextLine;
+      }
+
+      blocks.push({
+        object: 'block',
+        type: 'paragraph',
+        paragraph: {
+          rich_text: this._parseInlineMarkdown(paragraphContent)
+        }
+      });
+      i++;
     }
-    
-    // 处理剩余的段落
-    flushParagraphs();
-    
-    logger.info('[NotionService] ✓ Markdown转换完成，生成', blocks.length, '个blocks（优化后）');
+
+    // 处理剩余的代码块
+    if (currentCodeBlock !== null && currentCodeBlock.content.length > 0) {
+      blocks.push({
+        object: 'block',
+        type: 'code',
+        code: {
+          rich_text: [{
+            type: 'text',
+            text: {
+              content: currentCodeBlock.content.join('\n')
+            }
+          }],
+          language: this._normalizeLanguage(currentCodeBlock.language)
+        }
+      });
+    }
+
+    // 处理剩余的列表
+    if (currentList.length > 0) {
+      blocks.push(...currentList);
+    }
+
     return blocks;
   }
-  
+
+  /**
+   * 解析行内Markdown格式（粗体、斜体、代码、链接等）
+   * @private
+   * @param {string} text - 文本
+   * @returns {Array} rich_text数组
+   */
+  _parseInlineMarkdown(text) {
+    const richText = [];
+    let i = 0;
+
+    while (i < text.length) {
+      let matched = false;
+
+      // 行内代码 `code`
+      if (text[i] === '`' && text[i + 1] !== '`') {
+        let j = i + 1;
+        while (j < text.length && text[j] !== '`') j++;
+        if (j < text.length) {
+          const code = text.substring(i + 1, j);
+          if (code) {
+            richText.push({
+              type: 'text',
+              text: { content: code },
+              annotations: { code: true }
+            });
+          }
+          i = j + 1;
+          matched = true;
+        }
+      }
+
+      // 粗体+斜体 ***text*** 或 ___text___
+      if (!matched && (
+        (text.substring(i, i + 3) === '***' && text.indexOf('***', i + 3) > -1) ||
+        (text.substring(i, i + 3) === '___' && text.indexOf('___', i + 3) > -1)
+      )) {
+        const delimiter = text.substring(i, i + 3);
+        const endIndex = text.indexOf(delimiter, i + 3);
+        if (endIndex > -1) {
+          const content = text.substring(i + 3, endIndex);
+          if (content) {
+            richText.push({
+              type: 'text',
+              text: { content },
+              annotations: { bold: true, italic: true }
+            });
+          }
+          i = endIndex + 3;
+          matched = true;
+        }
+      }
+
+      // 粗体 **text** 或 __text__
+      if (!matched && (
+        (text.substring(i, i + 2) === '**' && text.indexOf('**', i + 2) > -1) ||
+        (text.substring(i, i + 2) === '__' && text.indexOf('__', i + 2) > -1)
+      )) {
+        const delimiter = text.substring(i, i + 2);
+        const endIndex = text.indexOf(delimiter, i + 2);
+        if (endIndex > -1) {
+          const content = text.substring(i + 2, endIndex);
+          if (content) {
+            richText.push({
+              type: 'text',
+              text: { content },
+              annotations: { bold: true }
+            });
+          }
+          i = endIndex + 2;
+          matched = true;
+        }
+      }
+
+      // 斜体 *text* 或 _text_
+      if (!matched && (
+        (text[i] === '*' && text[i + 1] !== '*' && text.indexOf('*', i + 1) > -1) ||
+        (text[i] === '_' && text[i + 1] !== '_' && text.indexOf('_', i + 1) > -1)
+      )) {
+        const delimiter = text[i];
+        const endIndex = text.indexOf(delimiter, i + 1);
+        if (endIndex > -1 && text[endIndex - 1] !== '\\') {
+          const content = text.substring(i + 1, endIndex);
+          if (content) {
+            richText.push({
+              type: 'text',
+              text: { content },
+              annotations: { italic: true }
+            });
+          }
+          i = endIndex + 1;
+          matched = true;
+        }
+      }
+
+      // 删除线 ~~text~~
+      if (!matched && text.substring(i, i + 2) === '~~') {
+        const endIndex = text.indexOf('~~', i + 2);
+        if (endIndex > -1) {
+          const content = text.substring(i + 2, endIndex);
+          if (content) {
+            richText.push({
+              type: 'text',
+              text: { content },
+              annotations: { strikethrough: true }
+            });
+          }
+          i = endIndex + 2;
+          matched = true;
+        }
+      }
+
+      // 链接 [text](url)
+      if (!matched && text[i] === '[') {
+        const closeIndex = text.indexOf(']', i + 1);
+        if (closeIndex > -1 && text[closeIndex + 1] === '(') {
+          const urlEnd = text.indexOf(')', closeIndex + 2);
+          if (urlEnd > -1) {
+            const linkText = text.substring(i + 1, closeIndex);
+            const url = text.substring(closeIndex + 2, urlEnd);
+            richText.push({
+              type: 'text',
+              text: { 
+                content: linkText,
+                link: { url }
+              },
+              annotations: { underline: true }
+            });
+            i = urlEnd + 1;
+            matched = true;
+          }
+        }
+      }
+
+      // 普通文本
+      if (!matched) {
+        // 查找下一个可能的特殊字符
+        let nextSpecial = text.length;
+        const specialChars = ['*', '_', '`', '~', '['];
+        for (const char of specialChars) {
+          const index = text.indexOf(char, i);
+          if (index > -1 && index < nextSpecial) {
+            nextSpecial = index;
+          }
+        }
+
+        const plainText = text.substring(i, nextSpecial);
+        if (plainText) {
+          // 如果上一个元素是普通文本，合并
+          if (richText.length > 0 && 
+              richText[richText.length - 1].type === 'text' &&
+              !richText[richText.length - 1].annotations &&
+              !richText[richText.length - 1].text.link) {
+            richText[richText.length - 1].text.content += plainText;
+          } else {
+            richText.push({
+              type: 'text',
+              text: { content: plainText }
+            });
+          }
+        }
+        i = nextSpecial === text.length ? text.length : nextSpecial;
+      }
+    }
+
+    // 如果没有内容，返回包含原文本的数组
+    if (richText.length === 0) {
+      return [{
+        type: 'text',
+        text: { content: text || '' }
+      }];
+    }
+
+    return richText;
+  }
+
+  /**
+   * 标准化代码语言名称
+   * @private
+   * @param {string} language - 语言名称
+   * @returns {string} Notion支持的语言名称
+   */
+  _normalizeLanguage(language) {
+    const langMap = {
+      'js': 'javascript',
+      'ts': 'typescript',
+      'py': 'python',
+      'rb': 'ruby',
+      'sh': 'bash',
+      'yml': 'yaml',
+      'json': 'json',
+      'xml': 'xml',
+      'html': 'html',
+      'css': 'css',
+      'sql': 'sql',
+      'md': 'markdown',
+      'tex': 'latex',
+      'r': 'r',
+      'cpp': 'c++',
+      'c': 'c',
+      'java': 'java',
+      'go': 'go',
+      'rust': 'rust',
+      'php': 'php',
+      'swift': 'swift',
+      'kotlin': 'kotlin',
+      'dart': 'dart',
+      'graph': 'plain text',
+      'mermaid': 'plain text',
+      'plaintext': 'plain text',
+      'text': 'plain text'
+    };
+    
+    const lower = language.toLowerCase();
+    return langMap[lower] || 'plain text';
+  }
+
   /**
    * 解析文本中的rich text格式（粗体、斜体等）- 简化版
    * @private
@@ -1631,7 +1809,8 @@ class NotionService {
       const bvid = videoInfo.bvid;
 
       // 获取或创建主页面
-      let mainPageId = state.getNotionPageId(bvid);
+      const videoKey = generateCacheKey(videoInfo);
+      let mainPageId = state.getNotionPageId(videoKey);
       
       if (!mainPageId) {
         // 创建新页面
@@ -1670,7 +1849,7 @@ class NotionService {
         const properties = this._buildProperties(schema, videoInfo, videoTitle, videoUrl, '', [], null);
 
         mainPageId = await this._createPage(notionConfig.apiKey, databaseId, properties, mainPageChildren);
-        state.setNotionPageId(bvid, mainPageId);
+        state.setNotionPageId(videoKey, mainPageId);
         logger.info('NotionService', '✓ 为后台任务创建主页面成功');
       }
 
@@ -1868,15 +2047,56 @@ class NotionService {
     // 首先获取现有的blocks
     const existingBlocks = await this._getPageBlocks(apiKey, pageId);
     
-    // 删除现有的blocks（保留标题）
+    // 找到并保存字幕相关的blocks
+    const subtitleBlocks = [];
+    let foundSubtitleSection = false;
+    
+    for (let i = 0; i < existingBlocks.length; i++) {
+      const block = existingBlocks[i];
+      
+      // 检查是否是字幕部分的开始（可能是分隔线或标题）
+      if (!foundSubtitleSection) {
+        // 检查是否是字幕标题
+        if (block.type === 'heading_2' && 
+            block.heading_2?.rich_text?.[0]?.text?.content?.includes('📝 字幕内容')) {
+          foundSubtitleSection = true;
+          // 如果前一个是分隔线，也包含它
+          if (i > 0 && existingBlocks[i-1].type === 'divider') {
+            subtitleBlocks.push(existingBlocks[i-1]);
+          }
+          subtitleBlocks.push(block);
+        }
+      } else {
+        // 已找到字幕部分，保存后续的块（通常是字幕链接）
+        subtitleBlocks.push(block);
+      }
+    }
+    
+    // 删除所有非child_page的blocks
     for (const block of existingBlocks) {
       if (block.type !== 'child_page') {
         await this._deleteBlock(apiKey, block.id);
       }
     }
     
-    // 添加新内容
+    // 先添加新内容（AI总结和时间戳段落）
     await this.appendToPage(apiKey, pageId, newChildren);
+    
+    // 如果有字幕blocks，重新添加它们
+    if (subtitleBlocks.length > 0) {
+      // 重新构建字幕blocks（因为原始的blocks可能包含id等信息，需要清理）
+      const cleanSubtitleBlocks = subtitleBlocks.map(block => {
+        // 创建一个干净的block副本，只包含必要的字段
+        const cleanBlock = {
+          object: 'block',
+          type: block.type
+        };
+        cleanBlock[block.type] = block[block.type];
+        return cleanBlock;
+      });
+      
+      await this.appendToPage(apiKey, pageId, cleanSubtitleBlocks);
+    }
   }
 
   /**

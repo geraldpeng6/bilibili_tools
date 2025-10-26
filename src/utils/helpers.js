@@ -49,7 +49,7 @@ export function extractBvidFromUrl(url = window.location.href) {
 
 /**
  * 获取视频信息
- * @returns {{bvid: string|null, cid: string|number|null, aid: string|number|null, videoId: string|null, platform: string}}
+ * @returns {{bvid: string|null, cid: string|number|null, aid: string|number|null, p: number|null, videoId: string|null, platform: string}}
  */
 export function getVideoInfo() {
   const hostname = location.hostname;
@@ -63,7 +63,8 @@ export function getVideoInfo() {
       platform: 'youtube',
       bvid: null,
       cid: null,
-      aid: null
+      aid: null,
+      p: null
     };
   }
   
@@ -72,23 +73,43 @@ export function getVideoInfo() {
     let bvid = null;
     let cid = null;
     let aid = null;
+    let p = null;
 
     // 从URL提取BV号
     bvid = extractBvidFromUrl();
+    
+    // 从URL提取分P参数
+    const urlParams = new URLSearchParams(window.location.search);
+    const pParam = urlParams.get('p');
+    p = pParam ? parseInt(pParam, 10) : 1; // 默认是第1P
 
     // 尝试从页面数据中获取CID和AID
     try {
       const initialState = unsafeWindow.__INITIAL_STATE__;
       if (initialState && initialState.videoData) {
         bvid = bvid || initialState.videoData.bvid;
-        cid = initialState.videoData.cid || initialState.videoData.pages?.[0]?.cid;
+        
+        // 对于多P视频，需要获取对应分P的CID
+        if (initialState.videoData.pages && initialState.videoData.pages.length > 0) {
+          const pageIndex = p - 1; // p是从1开始的，数组索引是从0开始的
+          if (initialState.videoData.pages[pageIndex]) {
+            cid = initialState.videoData.pages[pageIndex].cid;
+          } else {
+            // 如果找不到对应的分P，使用第一个分P的CID
+            cid = initialState.videoData.pages[0].cid;
+          }
+        } else {
+          // 单P视频
+          cid = initialState.videoData.cid;
+        }
+        
         aid = initialState.videoData.aid;
       }
     } catch (e) {
       // Silently ignore
     }
 
-    return { bvid, cid, aid, videoId: bvid, platform: 'bilibili' };
+    return { bvid, cid, aid, p, videoId: bvid, platform: 'bilibili' };
   }
   
   // 通用视频网站（尝试从meta标签获取）
@@ -107,6 +128,7 @@ export function getVideoInfo() {
     bvid: null, 
     cid: null, 
     aid: null,
+    p: null,
     videoId,
     platform: 'unknown'
   };

@@ -20,10 +20,18 @@ export default class BilibiliAdapter extends VideoPlayerAdapter {
   }
 
   /**
-   * 获取Bilibili视频ID (BV号)
+   * 获取Bilibili视频ID (BV号+分P)
    */
   getVideoId() {
-    return location.pathname.match(/video\/(BV\w+)/)?.[1];
+    const bvid = location.pathname.match(/video\/(BV\w+)/)?.[1];
+    if (!bvid) return null;
+    
+    // 获取分P参数
+    const urlParams = new URLSearchParams(window.location.search);
+    const p = urlParams.get('p') || '1';
+    
+    // 返回包含分P信息的ID，这样不同分P会被视为不同视频
+    return `${bvid}_p${p}`;
   }
 
   /**

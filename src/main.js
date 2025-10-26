@@ -234,10 +234,7 @@ class BilibiliSubtitleExtractor {
     if (this.isBilibili || (this.isYouTube && location.pathname === '/watch')) {
       this.createUI();
     }
-    // 其他网站创建基础UI（快速操作按钮等）
-    else {
-      this.createBasicUI();
-    }
+    // 其他网站不显示UI，只通过油猴菜单访问功能
 
     // 绑定事件
     this.bindEvents();
@@ -354,9 +351,29 @@ class BilibiliSubtitleExtractor {
       });
     }
 
-    GM_registerMenuCommand('笔记管理', () => {
+    // 笔记管理 - 全局可用
+    GM_registerMenuCommand('📝 笔记管理', () => {
       notesPanel.togglePanel();
     });
+
+    // 截图功能 - 有视频时显示
+    const hasVideo = document.querySelector('video') !== null;
+    if (hasVideo) {
+      GM_registerMenuCommand('📸 截图', async () => {
+        try {
+          const note = await screenshotService.captureAndSave(false);
+          if (note) {
+            notification.success('截图已保存到笔记');
+            const notesPanel = document.querySelector('.notes-panel');
+            if (notesPanel && notesPanel.style.display !== 'none') {
+              window.notesPanel?.render();
+            }
+          }
+        } catch (error) {
+          notification.error('截图失败: ' + error.message);
+        }
+      });
+    }
 
     // 快捷键设置 - 全局可用
     GM_registerMenuCommand('⌨️ 快捷键设置', () => {
@@ -591,183 +608,46 @@ class BilibiliSubtitleExtractor {
     }
   }
 
-  /**
-   * 创建基础UI - 用于其他网站
-   * 提供笔记、截图、速度控制等基础功能
-   */
-  createBasicUI() {
-    // 创建一个简单的控制按钮
-    const controlButton = document.createElement('div');
-    controlButton.id = 'universal-control-button';
-    controlButton.innerHTML = '🎬';
-    controlButton.title = '视频工具';
-    controlButton.style.cssText = `
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #feebea 0%, #ffdbdb 100%);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 24px;
-      cursor: pointer;
-      box-shadow: 0 4px 12px rgba(254, 235, 234, 0.5);
-      z-index: 999999;
-      transition: all 0.3s ease;
-    `;
+  // 已移除 createBasicUI 方法 - 通过油猴菜单访问功能
 
-    // 悬停效果
-    controlButton.addEventListener('mouseenter', () => {
-      controlButton.style.transform = 'scale(1.1)';
-    });
-    controlButton.addEventListener('mouseleave', () => {
-      controlButton.style.transform = 'scale(1)';
-    });
-
-    // 点击显示快捷菜单
-    controlButton.addEventListener('click', () => {
-      this.showQuickMenu();
-    });
-
-    document.body.appendChild(controlButton);
-    logger.info('Main', '基础UI已创建 - 适用于所有网站');
-  }
-
-  /**
-   * 显示快捷菜单
-   */
-  showQuickMenu() {
-    // 如果已存在，先移除
-    const existingMenu = document.getElementById('universal-quick-menu');
-    if (existingMenu) {
-      existingMenu.remove();
-      return;
-    }
-
-    const menu = document.createElement('div');
-    menu.id = 'universal-quick-menu';
-    menu.style.cssText = `
-      position: fixed;
-      bottom: 80px;
-      right: 20px;
-      background: white;
-      border-radius: 8px;
-      padding: 10px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-      z-index: 999998;
-      min-width: 150px;
-    `;
-
-    // 检测是否有视频
-    const videos = document.querySelectorAll('video');
-    const hasVideo = videos.length > 0;
-
-    const menuItems = [
-      { 
-        icon: '📝', 
-        text: '笔记管理', 
-        action: () => notesPanel.togglePanel() 
-      }
-    ];
-
-    if (hasVideo) {
-      menuItems.push(
-        { 
-          icon: '⏩', 
-          text: '速度 +0.1', 
-          action: () => speedControlService.adjustBaseSpeed(0.1) 
-        },
-        { 
-          icon: '⏪', 
-          text: '速度 -0.1', 
-          action: () => speedControlService.adjustBaseSpeed(-0.1) 
-        },
-        { 
-          icon: '⏯', 
-          text: '重置速度', 
-          action: () => speedControlService.resetToNormalSpeed() 
-        },
-        { 
-          icon: '📸', 
-          text: '截图', 
-          action: async () => {
-            try {
-              const note = await screenshotService.captureAndSave(false);
-              if (note) {
-                notification.success('截图已保存到笔记');
-                const notesPanel = document.querySelector('.notes-panel');
-                if (notesPanel && notesPanel.style.display !== 'none') {
-                  window.notesPanel?.render();
-                }
-              }
-            } catch (error) {
-              notification.error('截图失败: ' + error.message);
-            }
-          }
-        }
-      );
-    }
-
-    menuItems.push(
-      { 
-        icon: '⚙️', 
-        text: '快捷键设置', 
-        action: () => {
-          eventHandlers.showShortcutConfigModal();
-          menu.remove();
-        } 
-      }
-    );
-
-    // 创建菜单项
-    menuItems.forEach(item => {
-      const menuItem = document.createElement('div');
-      menuItem.style.cssText = `
-        padding: 8px 12px;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        transition: background 0.2s;
-        border-radius: 4px;
-      `;
-      menuItem.innerHTML = `<span>${item.icon}</span><span style="font-size: 14px;">${item.text}</span>`;
-      
-      menuItem.addEventListener('mouseenter', () => {
-        menuItem.style.background = '#f0f0f0';
-      });
-      menuItem.addEventListener('mouseleave', () => {
-        menuItem.style.background = 'transparent';
-      });
-      
-      menuItem.addEventListener('click', () => {
-        item.action();
-        menu.remove();
-      });
-      
-      menu.appendChild(menuItem);
-    });
-
-    document.body.appendChild(menu);
-
-    // 点击其他地方关闭菜单
-    setTimeout(() => {
-      document.addEventListener('click', function closeMenu(e) {
-        if (!menu.contains(e.target) && e.target.id !== 'universal-control-button') {
-          menu.remove();
-          document.removeEventListener('click', closeMenu);
-        }
-      });
-    }, 0);
-  }
+  // 已移除 showQuickMenu 方法 - 通过油猴菜单访问功能
 
   /**
    * 绑定事件监听器
    */
   bindEvents() {
+    // 监听视频切换事件（包括分P切换）
+    eventBus.on(EVENTS.VIDEO_CHANGED, (data) => {
+      logger.info('App', '监听到视频切换事件:', data);
+      
+      // 重置UI状态
+      if (this.ball) {
+        this.ball.classList.remove('has-data', 'ai-loading');
+        this.updateBallStatus(BALL_STATUS.IDLE);
+      }
+      
+      // 清空字幕和AI总结显示
+      if (this.container) {
+        // 清空字幕列表
+        const subtitleList = this.container.querySelector('#subtitle-list-container');
+        if (subtitleList) {
+          subtitleList.innerHTML = '<div class="segments-header">字幕列表</div><div class="empty-state">等待加载字幕...</div>';
+        }
+        
+        // 清空AI总结
+        const summaryPanel = this.container.querySelector('#summary-panel');
+        if (summaryPanel) {
+          summaryPanel.innerHTML = '<div class="ai-summary-placeholder">等待字幕加载完成后生成AI总结...</div>';
+        }
+      }
+      
+      // 延迟后重新获取字幕（给页面时间加载）
+      setTimeout(() => {
+        logger.debug('App', '开始重新获取字幕...');
+        subtitleService.checkSubtitleButton();
+      }, 2000); // 等待2秒，确保页面加载完成
+    });
+    
     // 监听字幕加载完成事件
     eventBus.on(EVENTS.SUBTITLE_LOADED, (data, videoKey) => {
       this.renderSubtitles(data);
@@ -778,12 +658,8 @@ class BilibiliSubtitleExtractor {
     // 监听AI总结开始事件
     eventBus.on(EVENTS.AI_SUMMARY_START, () => {
       logger.debug('App', 'AI总结开始，小球进入AI总结状态');
-      // 小球进入AI总结状态（更大幅度呼吸）
-      if (this.ball) {
-        this.ball.classList.remove('loading', 'active', 'no-subtitle', 'error');
-        this.ball.classList.add('ai-summarizing');
-        this.ball.title = '正在AI总结...';
-      }
+      // 使用状态管理系统设置小球状态
+      state.setBallStatus(BALL_STATUS.AI_SUMMARIZING);
       // AI图标进入加载状态
       const aiIcon = this.container?.querySelector('.ai-icon');
       if (aiIcon) {
@@ -805,12 +681,8 @@ class BilibiliSubtitleExtractor {
       if (this.container) {
         uiRenderer.updateAISummary(this.container, summary);
       }
-      // 恢复小球正常状态
-      if (this.ball) {
-        this.ball.classList.remove('ai-summarizing', 'loading');
-        this.ball.classList.add('active');
-        this.ball.title = '字幕提取器 - 点击查看字幕';
-      }
+      // 恢复小球正常状态（使用状态管理系统）
+      state.setBallStatus(BALL_STATUS.ACTIVE);
       // 更新AI图标状态
       const aiIcon = this.container?.querySelector('.ai-icon');
       if (aiIcon) {
@@ -836,12 +708,8 @@ class BilibiliSubtitleExtractor {
     eventBus.on(EVENTS.AI_SUMMARY_FAILED, (error) => {
       logger.debug('App', 'AI总结失败，恢复小球正常状态');
       notification.handleError(error, 'AI总结');
-      // 恢复小球正常状态
-      if (this.ball) {
-        this.ball.classList.remove('ai-summarizing', 'loading');
-        this.ball.classList.add('active');
-        this.ball.title = '字幕提取器 - 点击查看字幕';
-      }
+      // 恢复小球正常状态（使用状态管理系统）
+      state.setBallStatus(BALL_STATUS.ACTIVE);
       // 更新AI图标状态
       const aiIcon = this.container?.querySelector('.ai-icon');
       if (aiIcon) {
@@ -923,15 +791,22 @@ class BilibiliSubtitleExtractor {
       // 如果不需要AI总结，但需要自动发送到Notion
       else if (notionAutoEnabled && notionConfig.apiKey) {
         try {
-          // 直接发送到Notion（包含字幕，不包含AI总结）
+          // 获取内容配置选项
+          const contentOptions = config.getNotionContentOptions();
           const videoInfo = state.getVideoInfo();
+          
+          // 根据配置决定是否发送字幕
+          // 只有当用户勾选了字幕选项时才发送字幕数据
           await notionService.sendToNotion({
             videoInfo,
             aiSummary: cachedSummary, // 如果有缓存的AI总结也会发送
-            subtitleData: data,
+            subtitleData: contentOptions.subtitles ? data : null, // 根据配置决定是否发送字幕
             isAuto: true
           });
-          logger.debug('App', '字幕已自动发送到Notion');
+          
+          if (contentOptions.subtitles && data) {
+            logger.debug('App', '字幕已自动发送到Notion');
+          }
         } catch (error) {
           console.error('[App] 自动发送到Notion失败:', error);
         }
@@ -977,6 +852,11 @@ class BilibiliSubtitleExtractor {
         this.ball.style.cursor = 'default';
         this.ball.title = '正在加载字幕...';
         break;
+      case BALL_STATUS.AI_SUMMARIZING:
+        this.ball.classList.add('ai-summarizing');
+        this.ball.style.cursor = 'default';
+        this.ball.title = '正在AI总结...';
+        break;
     }
   }
 
@@ -987,6 +867,7 @@ class BilibiliSubtitleExtractor {
     let lastUrl = location.href;
     let lastBvid = location.href.match(/BV[1-9A-Za-z]{10}/)?.[0];
     let lastCid = null;
+    let lastP = parseInt(new URLSearchParams(window.location.search).get('p') || '1');
 
     // 获取当前CID
     const getCurrentCid = () => {
@@ -1005,21 +886,35 @@ class BilibiliSubtitleExtractor {
       const url = location.href;
       const currentBvid = url.match(/BV[1-9A-Za-z]{10}/)?.[0];
       const currentCid = getCurrentCid();
+      // 获取分P参数
+      const urlParams = new URLSearchParams(window.location.search);
+      const currentP = parseInt(urlParams.get('p') || '1');
 
-      // 当BV号或CID改变时重新初始化
-      if (url !== lastUrl && (currentBvid !== lastBvid || currentCid !== lastCid)) {
-        logger.debug('App', '检测到视频切换:', { from: lastBvid, to: currentBvid });
+      // 当BV号、CID或分P改变时重新初始化
+      if (url !== lastUrl && (currentBvid !== lastBvid || currentCid !== lastCid || currentP !== lastP)) {
+        logger.debug('App', '检测到视频切换:', { 
+          from: `${lastBvid}_p${lastP}`, 
+          to: `${currentBvid}_p${currentP}`,
+          oldCid: lastCid,
+          newCid: currentCid
+        });
         
         lastUrl = url;
         lastBvid = currentBvid;
         lastCid = currentCid;
+        lastP = currentP;
 
         // 重置所有状态
         state.reset();
         subtitleService.reset();
 
-        // 触发视频切换事件
-        eventBus.emit(EVENTS.VIDEO_CHANGED, { bvid: currentBvid, cid: currentCid });
+        // 触发视频切换事件（包含分P信息）
+        eventBus.emit(EVENTS.VIDEO_CHANGED, { 
+          bvid: currentBvid, 
+          cid: currentCid,
+          p: currentP,
+          oldP: lastP
+        });
 
         // 等待后重新检测字幕
         setTimeout(() => {

@@ -83,7 +83,7 @@ export function validateApiKey(apiKey) {
 
 /**
  * 验证视频信息
- * @param {{bvid: string, cid: string|number}} videoInfo - 视频信息
+ * @param {{bvid: string, cid: string|number, p: number}} videoInfo - 视频信息
  * @returns {{valid: boolean, error: string|null}}
  */
 export function validateVideoInfo(videoInfo) {
@@ -97,6 +97,13 @@ export function validateVideoInfo(videoInfo) {
   
   if (!videoInfo.cid) {
     return { valid: false, error: 'CID为空' };
+  }
+  
+  // 验证分P参数（如果存在）
+  if (videoInfo.p !== undefined && videoInfo.p !== null) {
+    if (!Number.isInteger(videoInfo.p) || videoInfo.p < 1) {
+      return { valid: false, error: '分P参数错误，必须是大于等于1的整数' };
+    }
   }
   
   return { valid: true, error: null };
@@ -160,7 +167,7 @@ export function validateSubtitleData(subtitleData) {
 
 /**
  * 安全地生成缓存键
- * @param {{bvid: string, cid: string|number}} videoInfo - 视频信息
+ * @param {{bvid: string, cid: string|number, p: number}} videoInfo - 视频信息
  * @returns {string|null} - 缓存键，如果无效返回null
  */
 export function generateCacheKey(videoInfo) {
@@ -169,6 +176,8 @@ export function generateCacheKey(videoInfo) {
     return null;
   }
   
-  return `${videoInfo.bvid}-${videoInfo.cid}`;
+  // 如果有分P信息，包含在缓存键中
+  const p = videoInfo.p || 1;
+  return `${videoInfo.bvid}-${videoInfo.cid}-p${p}`;
 }
 

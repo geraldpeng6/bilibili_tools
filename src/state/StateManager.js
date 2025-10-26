@@ -64,12 +64,13 @@ class StateManager {
       bvid: null,                    // 当前视频BV号
       cid: null,                     // 当前视频CID
       aid: null,                     // 当前视频AID
+      p: null,                        // 当前视频分P号（多P视频）
     };
   }
 
   /**
    * 更新视频信息
-   * @param {{bvid: string, cid: string|number, aid: string|number}} videoInfo
+   * @param {{bvid: string, cid: string|number, aid: string|number, p: number}} videoInfo
    */
   setVideoInfo(videoInfo) {
     const validation = validateVideoInfo(videoInfo);
@@ -77,20 +78,26 @@ class StateManager {
       return false;
     }
     
-    // 检测视频切换
+    // 检测视频切换（包括不同分P的切换）
     const oldBvid = this.video.bvid;
+    const oldP = this.video.p || 1;
     const newBvid = videoInfo.bvid;
+    const newP = videoInfo.p || 1;
     
-    if (oldBvid && oldBvid !== newBvid) {
-      logger.info('StateManager', `检测到视频切换: ${oldBvid} -> ${newBvid}`);
+    // 如果BV号不同，或者同一个视频但分P不同，都视为视频切换
+    if (oldBvid && (oldBvid !== newBvid || oldP !== newP)) {
+      logger.info('StateManager', `检测到视频切换: ${oldBvid}-P${oldP} -> ${newBvid}-P${newP}`);
       
       // 取消旧视频的所有运行中任务
-      taskManager.cancelVideoTasks(oldBvid);
+      const oldVideoKey = generateCacheKey({ bvid: oldBvid, cid: this.video.cid, p: oldP });
+      taskManager.cancelVideoTasks(oldVideoKey);
       
       // 发送视频切换事件
       eventBus.emit(EVENTS.VIDEO_CHANGED, {
         oldBvid,
         newBvid,
+        oldP,
+        newP,
         oldVideoInfo: { ...this.video },
         newVideoInfo: videoInfo
       });
@@ -99,13 +106,14 @@ class StateManager {
     this.video.bvid = videoInfo.bvid;
     this.video.cid = videoInfo.cid;
     this.video.aid = videoInfo.aid;
+    this.video.p = videoInfo.p || 1;
 
     return true;
   }
 
   /**
    * 获取当前视频信息
-   * @returns {{bvid: string, cid: string|number, aid: string|number}}
+   * @returns {{bvid: string, cid: string|number, aid: string|number, p: number}}
    */
   getVideoInfo() {
     return { ...this.video };
@@ -227,7 +235,6 @@ class StateManager {
 
     this.ai.isSummarizing = true;
     this.ai.abortController = new AbortController();
-    eventBus.emit(EVENTS.AI_SUMMARY_START);
     
     return true;
   }
@@ -320,22 +327,22 @@ class StateManager {
 
   /**
    * 设置Notion页面ID
-   * @param {string} bvid - 视频BV号
+   * @param {string} videoKey - 视频键（包含分P信息）
    * @param {string} pageId - Notion页面ID
    */
-  setNotionPageId(bvid, pageId) {
-    if (bvid && pageId) {
-      this.notion.pageIds[bvid] = pageId;
-    }
+  setNotionPageId(videoKey, pageId) {
+    // videoKey 格式: BVxxxx-cid-p1
+    this.notion.pageIds[videoKey] = pageId;
   }
 
   /**
    * 获取Notion页面ID
-   * @param {string} bvid - 视频BV号
-   * @returns {string|null} Notion页面ID
+   * @param {string} videoKey - 视频键（包含分P信息）
+   * @returns {string|null}
    */
-  getNotionPageId(bvid) {
-    return this.notion.pageIds[bvid] || null;
+  getNotionPageId(videoKey) {
+    // videoKey 格式: BVxxxx-cid-p1
+    return this.notion.pageIds[videoKey] || null;
   }
 
   /**

@@ -5,6 +5,7 @@
 
 import logger from './DebugLogger.js';
 import { STORAGE_KEYS } from '../constants.js';
+import { generateCacheKey } from './validators.js';
 
 class TaskManager {
   constructor() {
@@ -37,7 +38,7 @@ class TaskManager {
         const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
         const filtered = Object.entries(data)
           .filter(([, timestamp]) => timestamp > thirtyDaysAgo)
-          .map(([bvid]) => bvid);
+          .map(([videoKey]) => videoKey);
         return new Set(filtered);
       }
     } catch (error) {
@@ -53,8 +54,8 @@ class TaskManager {
   _saveProcessedVideos() {
     try {
       const data = {};
-      this.processedVideos.forEach(bvid => {
-        data[bvid] = Date.now();
+      this.processedVideos.forEach(videoKey => {
+        data[videoKey] = Date.now();
       });
       localStorage.setItem(STORAGE_KEYS.PROCESSED_VIDEOS, JSON.stringify(data));
     } catch (error) {
@@ -64,28 +65,46 @@ class TaskManager {
   
   /**
    * 检查视频是否已经自动处理过
-   * @param {string} bvid - 视频BV号
+   * @param {string|Object} videoKeyOrInfo - 视频缓存键或视频信息对象
    * @returns {boolean}
    */
-  isVideoProcessed(bvid) {
-    return this.processedVideos.has(bvid);
+  isVideoProcessed(videoKeyOrInfo) {
+    // 如果传入的是对象，生成缓存键
+    const videoKey = typeof videoKeyOrInfo === 'string' 
+      ? videoKeyOrInfo 
+      : generateCacheKey(videoKeyOrInfo);
+    
+    if (!videoKey) return false;
+    return this.processedVideos.has(videoKey);
   }
   
   /**
    * 标记视频为已处理
-   * @param {string} bvid - 视频BV号
+   * @param {string|Object} videoKeyOrInfo - 视频缓存键或视频信息对象
    */
-  markVideoProcessed(bvid) {
-    this.processedVideos.add(bvid);
+  markVideoProcessed(videoKeyOrInfo) {
+    // 如果传入的是对象，生成缓存键
+    const videoKey = typeof videoKeyOrInfo === 'string' 
+      ? videoKeyOrInfo 
+      : generateCacheKey(videoKeyOrInfo);
+    
+    if (!videoKey) return;
+    this.processedVideos.add(videoKey);
     this._saveProcessedVideos();
   }
   
   /**
    * 清除视频的处理记录（用于手动操作时）
-   * @param {string} bvid - 视频BV号
+   * @param {string|Object} videoKeyOrInfo - 视频缓存键或视频信息对象
    */
-  clearVideoProcessed(bvid) {
-    this.processedVideos.delete(bvid);
+  clearVideoProcessed(videoKeyOrInfo) {
+    // 如果传入的是对象，生成缓存键
+    const videoKey = typeof videoKeyOrInfo === 'string' 
+      ? videoKeyOrInfo 
+      : generateCacheKey(videoKeyOrInfo);
+    
+    if (!videoKey) return;
+    this.processedVideos.delete(videoKey);
     this._saveProcessedVideos();
   }
   
@@ -98,11 +117,18 @@ class TaskManager {
    * @returns {string} 任务ID
    */
   createTask(type, videoInfo, executor, isManual = false) {
-    const taskId = `${type}_${videoInfo.bvid}_${Date.now()}`;
+    const videoKey = generateCacheKey(videoInfo);
+    if (!videoKey) {
+      logger.error('TaskManager', '无效的视频信息，无法创建任务');
+      return null;
+    }
+    
+    const taskId = `${type}_${videoKey}_${Date.now()}`;
     
     // 如果是自动任务，检查是否已处理过
-    if (!isManual && this.isVideoProcessed(videoInfo.bvid)) {
-      logger.debug('TaskManager', `视频 ${videoInfo.bvid} 已自动处理过，跳过自动任务`);
+    if (!isManual && this.isVideoProcessed(videoInfo)) {
+      const p = videoInfo.p || 1;
+      logger.debug('TaskManager', `视频 ${videoInfo.bvid} P${p} 已自动处理过，跳过自动任务`);
       return null;
     }
     
@@ -149,7 +175,7 @@ class TaskManager {
       
       // 如果是自动任务且成功完成，标记视频为已处理
       if (!task.isManual && task.type === 'ai_summary') {
-        this.markVideoProcessed(task.videoInfo.bvid);
+        this.markVideoProcessed(task.videoInfo);
       }
       
       logger.success('TaskManager', `任务 ${task.id} 完成`);
@@ -178,13 +204,21 @@ class TaskManager {
   
   /**
    * 取消指定视频的所有任务
-   * @param {string} bvid - 视频BV号
+   * @param {string|Object} videoKeyOrInfo - 视频缓存键或视频信息对象
    */
-  cancelVideoTasks(bvid) {
+  cancelVideoTasks(videoKeyOrInfo) {
+    // 如果传入的是对象，生成缓存键
+    const videoKey = typeof videoKeyOrInfo === 'string' 
+      ? videoKeyOrInfo 
+      : generateCacheKey(videoKeyOrInfo);
+    
+    if (!videoKey) return 0;
+    
     let canceledCount = 0;
     
     this.activeTasks.forEach((task, taskId) => {
-      if (task.videoInfo.bvid === bvid && task.status === 'running') {
+      const taskVideoKey = generateCacheKey(task.videoInfo);
+      if (taskVideoKey === videoKey && task.status === 'running') {
         task.abortController.abort();
         task.status = 'canceled';
         canceledCount++;
@@ -193,7 +227,7 @@ class TaskManager {
     });
     
     if (canceledCount > 0) {
-      logger.info('TaskManager', `已取消视频 ${bvid} 的 ${canceledCount} 个任务`);
+      logger.info('TaskManager', `已取消视频 ${videoKey} 的 ${canceledCount} 个任务`);
     }
     
     return canceledCount;
@@ -219,13 +253,21 @@ class TaskManager {
   
   /**
    * 获取指定视频的活动任务
-   * @param {string} bvid - 视频BV号
+   * @param {string|Object} videoKeyOrInfo - 视频缓存键或视频信息对象
    * @returns {Array}
    */
-  getVideoTasks(bvid) {
+  getVideoTasks(videoKeyOrInfo) {
+    // 如果传入的是对象，生成缓存键
+    const videoKey = typeof videoKeyOrInfo === 'string' 
+      ? videoKeyOrInfo 
+      : generateCacheKey(videoKeyOrInfo);
+    
+    if (!videoKey) return [];
+    
     const tasks = [];
     this.activeTasks.forEach(task => {
-      if (task.videoInfo.bvid === bvid) {
+      const taskVideoKey = generateCacheKey(task.videoInfo);
+      if (taskVideoKey === videoKey) {
         tasks.push(task);
       }
     });
@@ -235,13 +277,25 @@ class TaskManager {
   /**
    * 检查是否有指定类型的任务在运行
    * @param {string} type - 任务类型
-   * @param {string} bvid - 视频BV号（可选）
+   * @param {string|Object} videoKeyOrInfo - 视频缓存键或视频信息对象（可选）
    * @returns {boolean}
    */
-  hasRunningTask(type, bvid = null) {
+  hasRunningTask(type, videoKeyOrInfo = null) {
+    // 如果提供了视频信息，生成缓存键
+    let videoKey = null;
+    if (videoKeyOrInfo !== null) {
+      videoKey = typeof videoKeyOrInfo === 'string' 
+        ? videoKeyOrInfo 
+        : generateCacheKey(videoKeyOrInfo);
+    }
+    
     for (const task of this.activeTasks.values()) {
       if (task.type === type && task.status === 'running') {
-        if (bvid === null || task.videoInfo.bvid === bvid) {
+        if (videoKey === null) {
+          return true;
+        }
+        const taskVideoKey = generateCacheKey(task.videoInfo);
+        if (taskVideoKey === videoKey) {
           return true;
         }
       }

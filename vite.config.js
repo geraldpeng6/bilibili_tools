@@ -8,7 +8,7 @@ export default defineConfig({
       userscript: {
         name: 'Bilibili & YouTube Tools',
         namespace: 'http://tampermonkey.net/',
-        version: '1.2.0',
+        version: '1.2.19',
         description: '跨平台视频工具集：字幕提取、AI总结、Notion集成、笔记保存、播放速度控制、广告跳过 - 支持B站和YouTube',
         author: 'geraldpeng & claude 4.5 sonnet',
         license: 'MIT',

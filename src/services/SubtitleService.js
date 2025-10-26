@@ -14,7 +14,6 @@ import { validateSubtitleData } from '../utils/validators.js';
 
 class SubtitleService {
   constructor() {
-    this.capturedSubtitleUrl = null;
     // 创建模块专用日志记录器
     this.log = LogDecorator.createModuleLogger('SubtitleService');
     this.setupInterceptor();
@@ -33,32 +32,44 @@ class SubtitleService {
     };
 
     unsafeWindow.XMLHttpRequest.prototype.send = function() {
-      if (this._url && this._url.includes('aisubtitle.hdslb.com')) {
-        subtitleService.log.trace('拦截到字幕请求:', this._url);
-        subtitleService.capturedSubtitleUrl = this._url;
-        state.subtitle.capturedUrl = this._url;
-
-        // 捕获到请求后尝试下载
-        setTimeout(() => {
-          subtitleService.downloadCapturedSubtitle();
-        }, TIMING.SUBTITLE_CAPTURE_DELAY);
+      const xhr = this;
+      
+      if (xhr._url && xhr._url.includes('aisubtitle.hdslb.com')) {
+        subtitleService.log.trace('拦截到字幕请求:', xhr._url);
+        
+        // 拦截响应数据而不是重新发送请求
+        const originalOnLoad = xhr.onload;
+        xhr.onload = function(event) {
+          try {
+            // 获取响应内容
+            const responseText = xhr.responseText;
+            if (responseText && xhr.status === 200) {
+              subtitleService.log.debug('拦截到字幕响应数据');
+              // 直接处理响应数据，避免重复请求
+              subtitleService.processCapturedSubtitle(responseText);
+            }
+          } catch (error) {
+            subtitleService.log.error('处理拦截的字幕响应失败:', error);
+          }
+          
+          // 调用原始的onload
+          if (originalOnLoad) {
+            originalOnLoad.call(this, event);
+          }
+        };
       }
+      
       return originalSend.apply(this, arguments);
     };
   }
 
   /**
-   * 下载捕获到的字幕（集成性能监控）
+   * 处理拦截到的字幕响应数据
+   * @param {string} responseText - 响应文本
    */
-  async downloadCapturedSubtitle() {
-    if (!this.capturedSubtitleUrl) {
-      this.log.debug('没有捕获到字幕URL');
-      return;
-    }
-    
-    this.log.debug('开始下载字幕，URL:', this.capturedSubtitleUrl);
-    // 性能监控：测量字幕下载耗时
-    await performanceMonitor.measureAsync('字幕下载', async () => {
+  async processCapturedSubtitle(responseText) {
+    // 性能监控：测量字幕处理耗时
+    await performanceMonitor.measureAsync('字幕处理', async () => {
       const videoInfo = getVideoInfo();
       state.setVideoInfo(videoInfo);
 
@@ -80,22 +91,33 @@ class SubtitleService {
       eventBus.emit(EVENTS.SUBTITLE_REQUESTED, videoInfo);
 
       try {
-        const subtitleData = await this._fetchSubtitle(this.capturedSubtitleUrl, videoInfo);
+        // 解析响应数据
+        const data = JSON.parse(responseText);
+        
+        if (!data.body || data.body.length === 0) {
+          throw new Error('字幕内容为空');
+        }
+        
+        const subtitleData = data.body;
         
         // 验证字幕数据
         const validation = validateSubtitleData(subtitleData);
         if (!validation.valid) {
-          this.log.success(`字幕捕获成功，共 ${subtitleData.length} 条`);
-          this.log.trace('字幕数据示例:', subtitleData.slice(0, 3));
           if (validation.details) {
             logger.error('SubtitleService', '验证详情:', validation.details);
           }
           throw new Error(validation.error);
         }
+        
+        this.log.success(`字幕捕获成功，共 ${subtitleData.length} 条`);
+        this.log.trace('字幕数据示例:', subtitleData.slice(0, 3));
 
         // 保存字幕数据（自动更新缓存）
         state.setSubtitleData(subtitleData);
         state.setBallStatus(BALL_STATUS.ACTIVE);
+        
+        // 触发字幕加载完成事件，通知UI更新
+        eventBus.emit(EVENTS.SUBTITLE_LOADED, subtitleData, state.getVideoKey());
 
       } catch (error) {
         this.log.error('字幕下载失败:', error);
@@ -125,7 +147,7 @@ class SubtitleService {
           'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
           'Cache-Control': 'no-cache',
           'Origin': 'https://www.bilibili.com',
-          'Referer': `https://www.bilibili.com/video/${videoInfo.bvid}/`,
+          'Referer': `https://www.bilibili.com/video/${videoInfo.bvid}/${videoInfo.p && videoInfo.p > 1 ? `?p=${videoInfo.p}` : ''}`,
           'Sec-Fetch-Dest': 'empty',
           'Sec-Fetch-Mode': 'cors',
           'Sec-Fetch-Site': 'cross-site',
@@ -133,9 +155,11 @@ class SubtitleService {
         },
         anonymous: false,
         onload: (response) => {
-          // 验证视频是否切换
+          // 验证视频是否切换（包括分P切换）
           const currentVideoInfo = getVideoInfo();
-          if (currentVideoInfo.bvid !== videoInfo.bvid || currentVideoInfo.cid !== videoInfo.cid) {
+          if (currentVideoInfo.bvid !== videoInfo.bvid || 
+              currentVideoInfo.cid !== videoInfo.cid || 
+              currentVideoInfo.p !== videoInfo.p) {
             reject(new Error('视频已切换'));
             return;
           }
@@ -202,9 +226,9 @@ class SubtitleService {
   async tryActivateSubtitle() {
     await delay(TIMING.SUBTITLE_ACTIVATION_DELAY);
 
-    if (this.capturedSubtitleUrl) {
-      this.downloadCapturedSubtitle();
-    } else {
+    // 如果还没有捕获到字幕，尝试触发字幕选择
+    // 注意：字幕响应会在拦截器中自动处理，不需要手动调用
+    if (!state.getSubtitleData()) {
       this.triggerSubtitleSelection();
     }
   }
