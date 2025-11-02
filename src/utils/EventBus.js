@@ -82,6 +82,12 @@ class EventBus {
     
     const handlers = [...this.events.get(event)]; // 复制数组，避免在遍历时被修改
     
+    // 监听器泄漏检测：如果某个事件有超过10个监听器，发出警告
+    const count = handlers.length;
+    if (count > 10) {
+      console.warn(`[EventBus] ⚠️ 事件 "${event}" 有 ${count} 个监听器，可能存在内存泄漏`);
+    }
+    
     for (const handler of handlers) {
       try {
         handler(...args);

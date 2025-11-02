@@ -85,15 +85,16 @@ const DEFAULT_PROMPT_1 = `请用中文总结以下视频字幕内容，使用Mar
 1. 在开头提供TL;DR（不超过50字的核心摘要）
 2. 使用标题、列表等Markdown格式组织内容
 3. 突出关键信息和要点
-4. 带时间戳，表示哪部分讲什么内容
+4. 总分结构，分段表示哪部分讲什么内容
 
-字幕内容：
+字幕内容如下：
 `;
 
-// 第二个AI请求的默认提示词 - JSON格式段落（带时间戳）
-const DEFAULT_PROMPT_2 = `分析以下带时间戳的字幕，提取5-8个关键段落。
+// 第二个AI请求的默认提示词 - JSON格式段落（带时间戳）+ 广告检测
+const DEFAULT_PROMPT_2 = `分析以下带时间戳的字幕，提取关键段落。
 
 重要：你的回复必须只包含JSON，不要有任何其他文字、解释或markdown标记。
+
 直接以{开始，以}结束。
 
 JSON格式要求：
@@ -103,6 +104,11 @@ JSON格式要求：
 
 示例（你的回复应该像这样）：
 {"segments":[{"timestamp":"00:15","title":"开场介绍","summary":"主持人介绍今天的主题和嘉宾背景"},{"timestamp":"02:30","title":"核心观点","summary":"讨论技术发展趋势和未来展望"}]}
+
+特别注意：如果视频中存在商业广告推广内容（明确提及产品名称、品牌、购买链接等），请在对应位置添加一个段落，title固定为"广告"，timestamp为广告开始时间，summary简述广告内容。
+
+包含广告的示例：
+{"segments":[{"timestamp":"00:15","title":"开场介绍","summary":"主持人介绍今天的主题"},{"timestamp":"02:30","title":"广告","summary":"推广某品牌手机，介绍功能和优惠"},{"timestamp":"04:00","title":"核心观点","summary":"讨论技术发展趋势"}]}
 
 字幕内容：
 `;
@@ -229,6 +235,10 @@ export const STORAGE_KEYS = {
   NOTION_CONTENT_SUMMARY: 'notion_content_summary',
   NOTION_CONTENT_SEGMENTS: 'notion_content_segments',
   NOTION_CONTENT_SUBTITLES: 'notion_content_subtitles',
+  
+  // 笔记同步配置
+  NOTION_NOTES_AUTO_SYNC: 'notion_notes_auto_sync_enabled',
+  NOTION_NOTES_DATABASE_ID: 'notion_notes_database_id',
   
   // 任务管理
   PROCESSED_VIDEOS: 'bilibili_tools_processed_videos',

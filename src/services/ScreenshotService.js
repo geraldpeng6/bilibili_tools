@@ -4,7 +4,6 @@
  */
 
 import state from '../state/StateManager.js';
-import notesService from './NotesService.js';
 import notionService from './NotionService.js';
 import config from '../config/ConfigManager.js';
 import notification from '../ui/Notification.js';
@@ -78,8 +77,8 @@ class ScreenshotService {
   }
 
   /**
-   * 截图并保存到笔记
-   * @param {boolean} sendToNotion - 是否发送到Notion
+   * 截图并发送到Notion（不再保存到本地笔记）
+   * @param {boolean} sendToNotion - 是否发送到Notion（已废弃，保留以兼容）
    */
   async captureAndSave(sendToNotion = false) {
     if (this.isProcessing) {
@@ -90,57 +89,25 @@ class ScreenshotService {
     this.isProcessing = true;
 
     try {
-      // 1. 捕获视频帧
-      const { blob, timestamp, timeString } = await this.captureVideoFrame();
+      // 1. 检查Notion配置
+      const notionConfig = config.getNotionConfig();
+      if (!notionConfig || !notionConfig.apiKey) {
+        throw new Error('请先配置Notion API Key（油猴菜单 → Notion配置）');
+      }
 
-      // 2. 转换为Base64（用于本地笔记）
-      const base64 = await this.blobToBase64(blob);
+      // 2. 捕获视频帧
+      const { blob, timestamp, timeString } = await this.captureVideoFrame();
 
       // 3. 获取视频信息
       const videoInfo = getVideoInfo();
       const videoTitle = getVideoTitle() || '未知视频';
-      const videoBvid = videoInfo?.bvid || '';
 
-      // 4. 保存到本地笔记
-      const noteContent = `[截图] ${timeString}`;
-      const note = notesService.addNote({
-        content: noteContent,
-        type: 'screenshot',
-        videoTimestamp: timestamp, // 视频播放时间（秒）
-        timeString,
-        imageData: base64,
-        videoTitle,
-        videoBvid
-      });
+      // 4. 发送到Notion
+      await this.sendToNotion(blob, timestamp, timeString, videoTitle);
 
-      notification.success(`截图已保存 (${timeString})`);
-
-      // 4.5 尝试添加到最近的AI总结笔记
-      try {
-        const allNotes = notesService.getAllNotes();
-        const summaryNote = allNotes.find(n => n.type === 'ai-summary');
-        
-        if (summaryNote && summaryNote.segments && summaryNote.segments.length > 0) {
-          notesService.addScreenshotToSummary(summaryNote.id, {
-            imageData: base64,
-            timeString,
-            videoTimestamp: timestamp
-          });
-          logger.debug('[Screenshot] 截图已添加到AI总结笔记');
-        }
-      } catch (error) {
-        logger.warn('[Screenshot] 添加截图到AI总结失败:', error);
-        // 不影响主流程
-      }
-
-      // 5. 如果需要发送到Notion
-      if (sendToNotion && config.isNotionConfigured()) {
-        await this.sendToNotion(blob, timestamp, timeString, videoTitle);
-      }
-
-      return note;
+      return { timestamp, timeString }; // 返回基本信息，不返回note对象
     } catch (error) {
-      logger.error('[Screenshot] 截图保存失败:', error);
+      logger.error('[Screenshot] 截图失败:', error);
       notification.error(`截图失败: ${error.message}`);
       throw error;
     } finally {
@@ -307,30 +274,33 @@ class ScreenshotService {
   async getOrCreateNotionPage(videoTitle, notionConfig) {
     const videoInfo = state.getVideoInfo();
     const bvid = videoInfo?.bvid;
+    const p = videoInfo?.p || 1;
+    const videoKey = state.getVideoKey();
 
-    if (!bvid) {
+    if (!bvid || !videoKey) {
       throw new Error('无效的视频信息');
     }
 
-    // 1. 先从状态中获取页面ID
-    let pageId = state.getNotionPageId(bvid);
+    // 1. 先从状态中获取页面ID（使用包含分P信息的videoKey）
+    let pageId = state.getNotionPageId(videoKey);
     
     if (pageId) {
       logger.debug('[Screenshot] 使用缓存的Notion页面ID:', pageId);
       return pageId;
     }
 
-    // 2. 如果没有缓存，查询数据库
+    // 2. 如果没有缓存，查询数据库（需要数据库ID）
     const databaseId = notionConfig.databaseId || notionConfig.parentPageId;
     
     if (databaseId) {
       try {
-        pageId = await notionService.queryVideoPage(notionConfig.apiKey, databaseId, bvid);
+        // 查询时带上分P信息
+        pageId = await notionService.queryVideoPage(notionConfig.apiKey, databaseId, bvid, p);
         
         if (pageId) {
           logger.debug('[Screenshot] 从Notion数据库找到页面:', pageId);
-          // 缓存找到的页面ID
-          state.setNotionPageId(bvid, pageId);
+          // 缓存找到的页面ID（使用videoKey）
+          state.setNotionPageId(videoKey, pageId);
           return pageId;
         }
       } catch (error) {
@@ -620,17 +590,6 @@ class ScreenshotService {
     });
   }
 
-  /**
-   * Blob转Base64
-   */
-  async blobToBase64(blob) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  }
 
   /**
    * 下载截图

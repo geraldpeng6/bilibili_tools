@@ -427,11 +427,18 @@ class NotionService {
    * @param {Array} children - 页面内容
    * @returns {Promise<Object>}
    */
-  _createPage(apiKey, databaseId, properties, children) {
+  async _createPage(apiKey, databaseId, properties, children) {
+    // Notion API 限制创建页面时最多100个blocks
+    const BATCH_SIZE = 95; // 保守一点，留出余量
+    
+    // 限制初始children数量
+    const initialChildren = children.slice(0, BATCH_SIZE);
+    const remainingChildren = children.slice(BATCH_SIZE);
+    
     const pageData = {
       parent: { database_id: databaseId },
       properties: properties,
-      children: children
+      children: initialChildren
     };
 
     return new Promise((resolve, reject) => {
@@ -444,10 +451,24 @@ class NotionService {
           'Notion-Version': API.NOTION_VERSION
         },
         data: JSON.stringify(pageData),
-        onload: (response) => {
+        onload: async (response) => {
           if (response.status === 200) {
             const data = JSON.parse(response.responseText);
-            resolve(data.id); // 返回页面ID
+            const pageId = data.id;
+            
+            // 如果还有剩余的blocks，追加到页面
+            if (remainingChildren.length > 0) {
+              logger.info(`[NotionService] 创建页面时有 ${remainingChildren.length} 个剩余blocks，追加中...`);
+              try {
+                await this.appendToPage(apiKey, pageId, remainingChildren);
+                logger.info('[NotionService] 剩余blocks追加完成');
+              } catch (error) {
+                logger.error('[NotionService] 追加剩余blocks失败:', error);
+                // 即使追加失败，也返回页面ID（至少创建成功了）
+              }
+            }
+            
+            resolve(pageId); // 返回页面ID
           } else {
             const error = this._parseNotionError(response);
             reject(error);
@@ -468,7 +489,14 @@ class NotionService {
    * @param {Array} children - 页面内容
    * @returns {Promise<string>} 子页面ID
    */
-  _createChildPage(apiKey, parentPageId, title, children) {
+  async _createChildPage(apiKey, parentPageId, title, children) {
+    // Notion API 限制创建页面时最多100个blocks
+    const BATCH_SIZE = 95; // 保守一点，留出余量
+    
+    // 限制初始children数量
+    const initialChildren = children.slice(0, BATCH_SIZE);
+    const remainingChildren = children.slice(BATCH_SIZE);
+    
     const pageData = {
       parent: { page_id: parentPageId },
       properties: {
@@ -476,7 +504,7 @@ class NotionService {
           title: [{ text: { content: title } }]
         }
       },
-      children: children
+      children: initialChildren
     };
 
     return new Promise((resolve, reject) => {
@@ -489,11 +517,25 @@ class NotionService {
           'Notion-Version': API.NOTION_VERSION
         },
         data: JSON.stringify(pageData),
-        onload: (response) => {
+        onload: async (response) => {
           if (response.status === 200) {
             const data = JSON.parse(response.responseText);
+            const pageId = data.id;
             logger.info('[NotionService] ✓ 子页面创建成功:', title);
-            resolve(data.id);
+            
+            // 如果还有剩余的blocks，追加到页面
+            if (remainingChildren.length > 0) {
+              logger.info(`[NotionService] 创建子页面时有 ${remainingChildren.length} 个剩余blocks，追加中...`);
+              try {
+                await this.appendToPage(apiKey, pageId, remainingChildren);
+                logger.info('[NotionService] 剩余blocks追加完成');
+              } catch (error) {
+                logger.error('[NotionService] 追加剩余blocks失败:', error);
+                // 即使追加失败，也返回页面ID（至少创建成功了）
+              }
+            }
+            
+            resolve(pageId);
           } else {
             const error = this._parseNotionError(response);
             reject(error);
@@ -1990,6 +2032,13 @@ class NotionService {
       });
     });
 
+    // Notion API 限制创建页面时最多100个blocks
+    const BATCH_SIZE = 95; // 保守一点，留出余量
+    
+    // 限制初始children数量
+    const initialChildren = children.slice(0, BATCH_SIZE);
+    const remainingChildren = children.slice(BATCH_SIZE);
+
     const pageData = {
       parent: { page_id: parentPageId },
       properties: {
@@ -2000,7 +2049,7 @@ class NotionService {
           }]
         }
       },
-      children: children.slice(0, 100) // Notion限制最多100个blocks
+      children: initialChildren
     };
 
     return new Promise((resolve, reject) => {
@@ -2013,17 +2062,24 @@ class NotionService {
           'Notion-Version': API.NOTION_VERSION
         },
         data: JSON.stringify(pageData),
-        onload: (response) => {
+        onload: async (response) => {
           if (response.status === 200) {
             const data = JSON.parse(response.responseText);
+            const pageId = data.id;
+            
             // 如果还有剩余的块，追加到页面
-            if (children.length > 100) {
-              this.appendToPage(apiKey, data.id, children.slice(100)).then(() => {
-                resolve(data.id);
-              });
-            } else {
-              resolve(data.id);
+            if (remainingChildren.length > 0) {
+              logger.info(`[NotionService] 创建字幕子页面时有 ${remainingChildren.length} 个剩余blocks，追加中...`);
+              try {
+                await this.appendToPage(apiKey, pageId, remainingChildren);
+                logger.info('[NotionService] 剩余blocks追加完成');
+              } catch (error) {
+                logger.error('[NotionService] 追加剩余blocks失败:', error);
+                // 即使追加失败，也返回页面ID（至少创建成功了）
+              }
             }
+            
+            resolve(pageId);
           } else {
             reject(this._parseNotionError(response));
           }
@@ -2047,55 +2103,80 @@ class NotionService {
     // 首先获取现有的blocks
     const existingBlocks = await this._getPageBlocks(apiKey, pageId);
     
-    // 找到并保存字幕相关的blocks
-    const subtitleBlocks = [];
-    let foundSubtitleSection = false;
+    // 分析现有内容结构
+    let subtitleSectionStart = -1;
+    let hasExistingContent = false;
     
+    // 找到字幕部分的起始位置
     for (let i = 0; i < existingBlocks.length; i++) {
       const block = existingBlocks[i];
       
-      // 检查是否是字幕部分的开始（可能是分隔线或标题）
-      if (!foundSubtitleSection) {
-        // 检查是否是字幕标题
-        if (block.type === 'heading_2' && 
-            block.heading_2?.rich_text?.[0]?.text?.content?.includes('📝 字幕内容')) {
-          foundSubtitleSection = true;
-          // 如果前一个是分隔线，也包含它
-          if (i > 0 && existingBlocks[i-1].type === 'divider') {
-            subtitleBlocks.push(existingBlocks[i-1]);
-          }
-          subtitleBlocks.push(block);
+      // 检查是否是字幕标题
+      if (block.type === 'heading_2' && 
+          block.heading_2?.rich_text?.[0]?.text?.content?.includes('📝 字幕内容')) {
+        // 如果前一个是分隔线，字幕部分从分隔线开始
+        if (i > 0 && existingBlocks[i-1].type === 'divider') {
+          subtitleSectionStart = i - 1;
+        } else {
+          subtitleSectionStart = i;
         }
-      } else {
-        // 已找到字幕部分，保存后续的块（通常是字幕链接）
-        subtitleBlocks.push(block);
+        break;
+      }
+      
+      // 检查是否已有时间戳段落或AI总结
+      if (block.type === 'heading_2' && 
+          (block.heading_2?.rich_text?.[0]?.text?.content?.includes('⏱️ 时间戳段落') ||
+           block.heading_2?.rich_text?.[0]?.text?.content?.includes('📊 视频总结'))) {
+        hasExistingContent = true;
       }
     }
     
-    // 删除所有非child_page的blocks
-    for (const block of existingBlocks) {
-      if (block.type !== 'child_page') {
+    // 如果有新内容要添加
+    if (newChildren && newChildren.length > 0) {
+      // 策略：只删除时间戳段落和AI总结部分，保留字幕部分
+      const blocksToDelete = [];
+      
+      for (let i = 0; i < existingBlocks.length; i++) {
+        const block = existingBlocks[i];
+        
+        // 如果到达字幕部分，停止删除
+        if (subtitleSectionStart >= 0 && i >= subtitleSectionStart) {
+          break;
+        }
+        
+        // 只删除非子页面的blocks（保留子页面）
+        if (block.type !== 'child_page') {
+          blocksToDelete.push(block);
+        }
+      }
+      
+      // 删除需要更新的blocks
+      for (const block of blocksToDelete) {
         await this._deleteBlock(apiKey, block.id);
       }
-    }
-    
-    // 先添加新内容（AI总结和时间戳段落）
-    await this.appendToPage(apiKey, pageId, newChildren);
-    
-    // 如果有字幕blocks，重新添加它们
-    if (subtitleBlocks.length > 0) {
-      // 重新构建字幕blocks（因为原始的blocks可能包含id等信息，需要清理）
-      const cleanSubtitleBlocks = subtitleBlocks.map(block => {
-        // 创建一个干净的block副本，只包含必要的字段
-        const cleanBlock = {
-          object: 'block',
-          type: block.type
-        };
-        cleanBlock[block.type] = block[block.type];
-        return cleanBlock;
-      });
       
-      await this.appendToPage(apiKey, pageId, cleanSubtitleBlocks);
+      // 添加新内容
+      if (subtitleSectionStart >= 0) {
+        // 如果有字幕部分，在字幕之前插入新内容
+        // 获取字幕部分第一个block的ID作为after参数
+        const firstSubtitleBlock = existingBlocks[subtitleSectionStart];
+        if (firstSubtitleBlock) {
+          // 插入到字幕部分之前（需要找到前一个block）
+          if (subtitleSectionStart > 0) {
+            const previousBlock = existingBlocks[subtitleSectionStart - 1];
+            // 这里简化处理：先追加到页面末尾，实际场景可能需要更复杂的处理
+            await this.appendToPage(apiKey, pageId, newChildren);
+          } else {
+            // 字幕部分在最前面，直接追加
+            await this.appendToPage(apiKey, pageId, newChildren);
+          }
+        } else {
+          await this.appendToPage(apiKey, pageId, newChildren);
+        }
+      } else {
+        // 没有字幕部分，直接追加新内容
+        await this.appendToPage(apiKey, pageId, newChildren);
+      }
     }
   }
 
@@ -2175,6 +2256,217 @@ class NotionService {
     } catch (e) {
       return new Error(`请求失败: ${response.status}`);
     }
+  }
+
+  /**
+   * 创建笔记数据库
+   * @param {string} apiKey - API Key
+   * @param {string} parentPageId - 父页面ID
+   * @returns {Promise<string>} - 返回创建的数据库ID
+   */
+  async createNotesDatabase(apiKey, parentPageId) {
+    const databaseData = {
+      parent: {
+        type: 'page_id',
+        page_id: parentPageId
+      },
+      title: [
+        {
+          type: 'text',
+          text: { content: '📝 笔记收藏' }
+        }
+      ],
+      properties: {
+        '内容': { title: {} },
+        '来源': { rich_text: {} },
+        '网址': { url: {} },
+        '类型': { 
+          select: { 
+            options: [
+              { name: '文字笔记', color: 'blue' },
+              { name: '截图笔记', color: 'green' },
+              { name: 'AI总结', color: 'purple' }
+            ]
+          }
+        },
+        '视频标题': { rich_text: {} },
+        'BV号': { rich_text: {} },
+        '时间戳': { rich_text: {} },
+        '创建时间': { date: {} }
+      }
+    };
+
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'POST',
+        url: `${API.NOTION_BASE_URL}/databases`,
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'Notion-Version': API.NOTION_VERSION
+        },
+        data: JSON.stringify(databaseData),
+        onload: (response) => {
+          if (response.status === 200) {
+            const data = JSON.parse(response.responseText);
+            resolve(data.id);
+          } else {
+            const error = this._parseNotionError(response);
+            reject(error);
+          }
+        },
+        onerror: (error) => {
+          reject(new Error('网络请求失败'));
+        }
+      });
+    });
+  }
+
+  /**
+   * 发送笔记到Notion
+   * @param {Object} note - 笔记对象
+   * @returns {Promise<void>}
+   */
+  async sendNoteToNotion(note) {
+    const notionConfig = config.getNotionConfig();
+    if (!notionConfig.apiKey) {
+      throw new Error('请先配置 Notion API Key');
+    }
+
+    let notesDatabaseId = config.getNotionNotesDatabaseId();
+    
+    // 如果没有笔记数据库ID，先创建数据库
+    if (!notesDatabaseId) {
+      try {
+        notesDatabaseId = await this.createNotesDatabase(notionConfig.apiKey, notionConfig.parentPageId);
+        config.setNotionNotesDatabaseId(notesDatabaseId);
+        logger.info('NotionService', '成功创建笔记数据库');
+      } catch (error) {
+        logger.error('NotionService', '创建笔记数据库失败:', error);
+        throw error;
+      }
+    }
+
+    // 构建页面属性
+    const properties = {
+      '内容': { 
+        title: [{
+          text: { 
+            content: note.content ? note.content.substring(0, 100) : '笔记'
+          }
+        }]
+      },
+      '网址': { 
+        url: note.url || window.location.href 
+      },
+      '类型': {
+        select: { 
+          name: note.type === 'screenshot' ? '截图笔记' : 
+                note.type === 'ai-summary' ? 'AI总结' : '文字笔记'
+        }
+      },
+      '创建时间': {
+        date: {
+          start: new Date(note.createdAt || note.timestamp || Date.now()).toISOString()
+        }
+      }
+    };
+
+    // 如果有视频信息，添加视频相关字段
+    if (note.videoInfo) {
+      properties['视频标题'] = {
+        rich_text: [{
+          text: { content: note.videoInfo.title || '' }
+        }]
+      };
+      properties['BV号'] = {
+        rich_text: [{
+          text: { content: note.videoInfo.bvid || '' }
+        }]
+      };
+    }
+
+    // 如果是截图笔记，添加时间戳
+    if (note.type === 'screenshot' && note.timeString) {
+      properties['时间戳'] = {
+        rich_text: [{
+          text: { content: note.timeString }
+        }]
+      };
+    }
+
+    // 构建页面内容
+    const children = [];
+    
+    // 添加笔记内容
+    if (note.content) {
+      children.push({
+        object: 'block',
+        type: 'paragraph',
+        paragraph: {
+          rich_text: [{
+            type: 'text',
+            text: { content: note.content }
+          }]
+        }
+      });
+    }
+
+    // 如果是截图笔记，添加截图
+    if (note.type === 'screenshot' && note.imageData) {
+      children.push({
+        object: 'block',
+        type: 'image',
+        image: {
+          type: 'external',
+          external: {
+            url: note.imageData
+          }
+        }
+      });
+    }
+
+    // 如果是AI总结，添加段落内容
+    if (note.type === 'ai-summary' && note.summary) {
+      const summaryBlocks = this._convertMarkdownToNotionBlocks(note.summary);
+      children.push(...summaryBlocks);
+    }
+
+    // 创建Notion页面
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: 'POST',
+        url: `${API.NOTION_BASE_URL}/pages`,
+        headers: {
+          'Authorization': `Bearer ${notionConfig.apiKey}`,
+          'Content-Type': 'application/json',
+          'Notion-Version': API.NOTION_VERSION
+        },
+        data: JSON.stringify({
+          parent: {
+            type: 'database_id',
+            database_id: notesDatabaseId
+          },
+          properties: properties,
+          children: children
+        }),
+        onload: (response) => {
+          if (response.status === 200) {
+            logger.success('NotionService', '笔记已成功发送到Notion');
+            notification.success('笔记已同步到Notion');
+            resolve();
+          } else {
+            const error = this._parseNotionError(response);
+            logger.error('NotionService', '发送笔记失败:', error);
+            reject(error);
+          }
+        },
+        onerror: (error) => {
+          logger.error('NotionService', '网络请求失败:', error);
+          reject(new Error('网络请求失败'));
+        }
+      });
+    });
   }
 }
 

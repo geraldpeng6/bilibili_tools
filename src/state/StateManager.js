@@ -130,6 +130,7 @@ class StateManager {
   /**
    * 设置字幕数据（同时更新缓存）
    * @param {Array} data - 字幕数据
+   * 注意：此方法只保存数据，不触发事件。事件应由SubtitleService统一触发，避免重复
    */
   setSubtitleData(data) {
     this.subtitle.data = data;
@@ -140,10 +141,8 @@ class StateManager {
       this.subtitle.cache[videoKey] = data;
     }
     
-    // 触发事件
-    if (data && data.length > 0) {
-      eventBus.emit(EVENTS.SUBTITLE_LOADED, data, videoKey);
-    }
+    // 不再触发事件 - 避免重复触发（SubtitleService已经触发了）
+    // 如果data存在，事件应由调用方（SubtitleService）触发
   }
 
   /**

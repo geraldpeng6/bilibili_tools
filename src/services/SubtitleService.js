@@ -16,6 +16,7 @@ class SubtitleService {
   constructor() {
     // 创建模块专用日志记录器
     this.log = LogDecorator.createModuleLogger('SubtitleService');
+    this.interceptorSetup = false;  // 拦截器设置标志
     this.setupInterceptor();
   }
 
@@ -23,6 +24,12 @@ class SubtitleService {
    * 设置字幕请求拦截器
    */
   setupInterceptor() {
+    // 防止重复设置拦截器
+    if (this.interceptorSetup) {
+      logger.debug('SubtitleService', '拦截器已设置，跳过重复设置');
+      return;
+    }
+    this.interceptorSetup = true;
     const originalOpen = unsafeWindow.XMLHttpRequest.prototype.open;
     const originalSend = unsafeWindow.XMLHttpRequest.prototype.send;
 
@@ -73,6 +80,19 @@ class SubtitleService {
       const videoInfo = getVideoInfo();
       state.setVideoInfo(videoInfo);
 
+      // 检查缓存：如果已有字幕缓存，直接使用缓存，不处理新请求
+      const videoKey = state.getVideoKey();
+      if (videoKey) {
+        const cachedSubtitle = state.getSubtitleData(videoKey);
+        if (cachedSubtitle && cachedSubtitle.length > 0) {
+          this.log.info('检测到字幕缓存，跳过拦截处理，直接使用缓存');
+          state.setSubtitleData(cachedSubtitle);
+          state.setBallStatus(BALL_STATUS.ACTIVE);
+          eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedSubtitle, videoKey);
+          return;
+        }
+      }
+
       // 开始请求（使用状态管理器的原子操作）
       const result = state.startRequest();
       if (!result.success) {
@@ -121,6 +141,11 @@ class SubtitleService {
 
       } catch (error) {
         this.log.error('字幕下载失败:', error);
+        this.log.error('错误详情:', {
+          message: error.message,
+          stack: error.stack,
+          videoInfo: getVideoInfo()
+        });
         state.setBallStatus(BALL_STATUS.ERROR);
         eventBus.emit(EVENTS.SUBTITLE_FAILED, error.message);
       } finally {
@@ -199,6 +224,19 @@ class SubtitleService {
    * 检测字幕按钮
    */
   async checkSubtitleButton() {
+    // 检查缓存：如果已有字幕缓存，直接返回，不触发按钮
+    const videoKey = state.getVideoKey();
+    if (videoKey) {
+      const cachedSubtitle = state.getSubtitleData(videoKey);
+      if (cachedSubtitle && cachedSubtitle.length > 0) {
+        this.log.info('检测到字幕缓存，跳过按钮触发和拦截操作');
+        state.setSubtitleData(cachedSubtitle); // 设置当前字幕数据
+        state.setBallStatus(BALL_STATUS.ACTIVE);
+        eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedSubtitle, videoKey);
+        return true;
+      }
+    }
+
     let checkCount = 0;
     
     return new Promise((resolve) => {
@@ -224,7 +262,33 @@ class SubtitleService {
    * 尝试激活字幕
    */
   async tryActivateSubtitle() {
+    // 检查缓存：如果已有字幕缓存，直接返回，不触发按钮
+    const videoKey = state.getVideoKey();
+    if (videoKey) {
+      const cachedSubtitle = state.getSubtitleData(videoKey);
+      if (cachedSubtitle && cachedSubtitle.length > 0) {
+        this.log.info('检测到字幕缓存，跳过字幕按钮触发');
+        state.setSubtitleData(cachedSubtitle); // 设置当前字幕数据
+        state.setBallStatus(BALL_STATUS.ACTIVE);
+        eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedSubtitle, videoKey);
+        return;
+      }
+    }
+
     await delay(TIMING.SUBTITLE_ACTIVATION_DELAY);
+
+    // 延迟后再次检查：拦截器可能已经在延迟期间捕获了字幕
+    const videoKeyAfterDelay = state.getVideoKey();
+    if (videoKeyAfterDelay) {
+      const cachedSubtitleAfterDelay = state.getSubtitleData(videoKeyAfterDelay);
+      if (cachedSubtitleAfterDelay && cachedSubtitleAfterDelay.length > 0) {
+        this.log.info('延迟后检测到字幕数据（拦截器已捕获），跳过按钮触发');
+        state.setSubtitleData(cachedSubtitleAfterDelay);
+        state.setBallStatus(BALL_STATUS.ACTIVE);
+        eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedSubtitleAfterDelay, videoKeyAfterDelay);
+        return;
+      }
+    }
 
     // 如果还没有捕获到字幕，尝试触发字幕选择
     // 注意：字幕响应会在拦截器中自动处理，不需要手动调用
@@ -237,6 +301,19 @@ class SubtitleService {
    * 触发字幕选择
    */
   async triggerSubtitleSelection() {
+    // 再次检查：拦截器可能已经捕获了字幕（竞态条件保护）
+    const videoKey = state.getVideoKey();
+    if (videoKey) {
+      const cachedSubtitle = state.getSubtitleData(videoKey);
+      if (cachedSubtitle && cachedSubtitle.length > 0) {
+        this.log.info('触发字幕选择前检测到字幕数据（拦截器已捕获），跳过按钮点击');
+        state.setSubtitleData(cachedSubtitle);
+        state.setBallStatus(BALL_STATUS.ACTIVE);
+        eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedSubtitle, videoKey);
+        return;
+      }
+    }
+
     const subtitleResultBtn = document.querySelector(SELECTORS.SUBTITLE_BUTTON);
 
     if (!subtitleResultBtn) {
@@ -248,6 +325,24 @@ class SubtitleService {
     subtitleResultBtn.click();
 
     await delay(TIMING.MENU_OPEN_DELAY);
+
+    // 点击按钮后再次检查：拦截器可能在点击时捕获了字幕
+    const videoKeyAfterClick = state.getVideoKey();
+    if (videoKeyAfterClick) {
+      const cachedSubtitleAfterClick = state.getSubtitleData(videoKeyAfterClick);
+      if (cachedSubtitleAfterClick && cachedSubtitleAfterClick.length > 0) {
+        this.log.info('点击按钮后检测到字幕数据（拦截器已捕获），跳过后续操作');
+        // 关闭菜单（如果已打开）
+        const closeBtn = document.querySelector(SELECTORS.SUBTITLE_CLOSE_SWITCH);
+        if (closeBtn) {
+          closeBtn.click();
+        }
+        state.setSubtitleData(cachedSubtitleAfterClick);
+        state.setBallStatus(BALL_STATUS.ACTIVE);
+        eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedSubtitleAfterClick, videoKeyAfterClick);
+        return;
+      }
+    }
 
     // 查找中文字幕选项
     let chineseOption = document.querySelector('.bpx-player-ctrl-subtitle-language-item[data-lan="ai-zh"]');
@@ -280,10 +375,32 @@ class SubtitleService {
       // 等待字幕请求被捕获
       await delay(TIMING.SUBTITLE_ACTIVATION_DELAY);
       
+      // 检查拦截器是否已经捕获了字幕数据（而不是URL）
+      const videoKeyAfterWait = state.getVideoKey();
+      if (videoKeyAfterWait) {
+        const cachedSubtitleAfterWait = state.getSubtitleData(videoKeyAfterWait);
+        if (cachedSubtitleAfterWait && cachedSubtitleAfterWait.length > 0) {
+          this.log.info('等待后检测到字幕数据（拦截器已捕获），跳过URL检查');
+          state.setSubtitleData(cachedSubtitleAfterWait);
+          state.setBallStatus(BALL_STATUS.ACTIVE);
+          eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedSubtitleAfterWait, videoKeyAfterWait);
+          return;
+        }
+      }
+      
       if (this.capturedSubtitleUrl) {
         this.downloadCapturedSubtitle();
       } else {
+        const errorMsg = '字幕激活失败：未捕获到字幕URL';
+        this.log.error(errorMsg);
+        this.log.error('错误详情:', {
+          videoInfo: getVideoInfo(),
+          subtitleButton: !!subtitleResultBtn,
+          chineseOption: !!chineseOption,
+          hasSubtitleData: !!state.getSubtitleData()
+        });
         state.setBallStatus(BALL_STATUS.ERROR);
+        eventBus.emit(EVENTS.SUBTITLE_FAILED, errorMsg);
       }
     } else {
       // 尝试第一个选项
@@ -297,10 +414,32 @@ class SubtitleService {
         
         await delay(TIMING.SUBTITLE_ACTIVATION_DELAY);
         
+        // 检查拦截器是否已经捕获了字幕数据
+        const videoKeyAfterFirstOption = state.getVideoKey();
+        if (videoKeyAfterFirstOption) {
+          const cachedSubtitleAfterFirstOption = state.getSubtitleData(videoKeyAfterFirstOption);
+          if (cachedSubtitleAfterFirstOption && cachedSubtitleAfterFirstOption.length > 0) {
+            this.log.info('选择第一个选项后检测到字幕数据（拦截器已捕获），跳过URL检查');
+            state.setSubtitleData(cachedSubtitleAfterFirstOption);
+            state.setBallStatus(BALL_STATUS.ACTIVE);
+            eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedSubtitleAfterFirstOption, videoKeyAfterFirstOption);
+            return;
+          }
+        }
+        
         if (this.capturedSubtitleUrl) {
           this.downloadCapturedSubtitle();
         } else {
+          const errorMsg = '字幕激活失败：选择第一个选项后未捕获到字幕URL';
+          this.log.error(errorMsg);
+          this.log.error('错误详情:', {
+            videoInfo: getVideoInfo(),
+            subtitleButton: !!subtitleResultBtn,
+            firstOption: !!firstOption,
+            hasSubtitleData: !!state.getSubtitleData()
+          });
           state.setBallStatus(BALL_STATUS.ERROR);
+          eventBus.emit(EVENTS.SUBTITLE_FAILED, errorMsg);
         }
       } else {
         subtitleResultBtn.click();

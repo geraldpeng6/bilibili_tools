@@ -123,6 +123,17 @@ class TaskManager {
       return null;
     }
     
+    // 检查是否已有相同类型的运行中任务（防止重复）
+    for (const [taskId, task] of this.activeTasks) {
+      const taskVideoKey = generateCacheKey(task.videoInfo);
+      if (taskVideoKey === videoKey && 
+          task.type === type && 
+          (task.status === 'pending' || task.status === 'running')) {
+        logger.info('TaskManager', `视频 ${videoInfo.bvid} 已有 ${type} 任务在运行中，跳过创建`);
+        return null;
+      }
+    }
+    
     const taskId = `${type}_${videoKey}_${Date.now()}`;
     
     // 如果是自动任务，检查是否已处理过

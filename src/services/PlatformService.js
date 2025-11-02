@@ -11,18 +11,34 @@ import youtubeSubtitleService from './YouTubeSubtitleService.js';
 
 class PlatformService {
   constructor() {
+    // 单例模式：防止多次初始化
+    if (PlatformService.instance) {
+      return PlatformService.instance;
+    }
+    
     this.currentPlatform = null;
     this.adapter = null;
     this.subtitleService = null;
+    this.initialized = false;
+    
+    // 保存实例
+    PlatformService.instance = this;
   }
 
   /**
    * 初始化平台服务
    */
   init() {
+    // 防止重复初始化
+    if (this.initialized) {
+      logger.debug('PlatformService', '平台服务已初始化，跳过重复初始化');
+      return this;
+    }
+    
     this.detectPlatform();
     this.setupAdapter();
     this.setupSubtitleService();
+    this.initialized = true;
     
     logger.info('PlatformService', `当前平台: ${this.currentPlatform}`);
     return this;

@@ -11,7 +11,7 @@ import notesService from './NotesService.js';
 import notionService from './NotionService.js';
 import { getVideoTitle, getVideoUrl } from '../utils/helpers.js';
 import taskManager from '../utils/TaskManager.js';
-import { EVENTS, TIMING } from '../constants.js';
+import { EVENTS, TIMING, BALL_STATUS } from '../constants.js';
 import { withTimeout } from '../utils/helpers.js';
 import LogDecorator from '../utils/LogDecorator.js';
 
@@ -53,6 +53,26 @@ class AIService {
     // 性能监控：测量AI总结耗时
     return await performanceMonitor.measureAsync('AI总结', async () => {
       try {
+        // 检查缓存：如果已有AI总结缓存且不是手动触发，直接返回缓存
+        const videoKey = state.getVideoKey();
+        if (videoKey && !isManual) {
+          const cachedSummary = state.getAISummary(videoKey);
+          if (cachedSummary) {
+            this.log.info('检测到AI总结缓存，直接使用缓存，跳过请求');
+            // 如果是对象格式，直接返回
+            if (typeof cachedSummary === 'object' && cachedSummary.markdown) {
+              return cachedSummary;
+            }
+            // 如果是字符串格式，尝试解析（兼容旧格式）
+            try {
+              return JSON.parse(cachedSummary);
+            } catch (e) {
+              // 旧格式字符串，返回null让后续逻辑处理
+              this.log.warn('检测到旧格式缓存，需要重新生成');
+            }
+          }
+        }
+
         const aiConfig = config.getSelectedAIConfig();
           
           if (!aiConfig) {
@@ -118,7 +138,58 @@ class AIService {
           taskManager.clearVideoProcessed(taskVideoInfo);
         }
         
-        // 创建任务
+        // 检查是否有运行中的任务
+        const existingTask = this._findExistingTask(taskVideoInfo);
+        if (existingTask) {
+          if (existingTask.status === 'completed') {
+            // 任务已完成，直接返回结果
+            this.log.info('发现已完成的任务，直接返回结果');
+            // 确保小球状态正确（如果处于AI总结状态，需要恢复）
+            if (state.getBallStatus() === BALL_STATUS.AI_SUMMARIZING) {
+              state.setBallStatus(BALL_STATUS.ACTIVE);
+            }
+            return existingTask.result;
+          } else if (existingTask.status === 'pending' || existingTask.status === 'running') {
+            // 任务正在运行，等待完成
+            this.log.info('发现运行中的任务，等待完成...');
+            // 如果还没有进入AI总结状态，设置并仅触发一次开始事件
+            if (state.startAISummary()) {
+              eventBus.emit(EVENTS.AI_SUMMARY_START);
+            }
+            
+            // 等待任务完成
+            while (existingTask.status === 'pending' || existingTask.status === 'running') {
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+            if (existingTask.status === 'completed') {
+              return existingTask.result;
+            } else if (existingTask.error) {
+              throw existingTask.error;
+            } else {
+              throw new Error('任务被取消');
+            }
+          }
+        }
+        
+        // 检查是否已自动处理过（仅在自动任务时）
+        if (!isManual && taskManager.isVideoProcessed(taskVideoInfo)) {
+          this.log.info('视频已自动处理过，跳过自动任务');
+          // 确保小球状态正确（如果处于AI总结状态，需要恢复）
+          if (state.getBallStatus() === BALL_STATUS.AI_SUMMARIZING) {
+            state.setBallStatus(BALL_STATUS.ACTIVE);
+          }
+          // 尝试从缓存获取结果
+          const cachedSummary = state.getAISummary(videoKey);
+          if (cachedSummary) {
+            // 如果有缓存，直接返回，不触发事件（因为这不是新任务）
+            return cachedSummary;
+          }
+          // 如果没有缓存，返回null，但不触发任何事件
+          return null;
+        }
+        
+        // 创建新任务
         const taskId = taskManager.createTask(
           'ai_summary', 
           taskVideoInfo,
@@ -129,12 +200,14 @@ class AIService {
         );
         
         if (!taskId) {
-          this.log.info('视频已自动处理过，跳过自动任务');
+          this.log.info('任务创建失败，可能是已有相同任务');
           return null;
         }
         
-        // 触发AI总结开始事件（启动粉色小球呼吸效果）
-        eventBus.emit(EVENTS.AI_SUMMARY_START);
+        // 设置AI总结状态并仅在首次触发开始事件（启动粉色小球呼吸效果）
+        if (state.startAISummary()) {
+          eventBus.emit(EVENTS.AI_SUMMARY_START);
+        }
         
         // 获取任务结果
         const task = taskManager.activeTasks.get(taskId);
@@ -165,83 +238,153 @@ class AIService {
   }
   
   /**
+   * 查找已存在的任务
+   * @private
+   * @param {Object} videoInfo - 视频信息
+   * @returns {Object|null} 任务对象或null
+   */
+  _findExistingTask(videoInfo) {
+    for (const [taskId, task] of taskManager.activeTasks) {
+      const taskVideoKey = task.videoInfo?.bvid && task.videoInfo?.cid && task.videoInfo?.p
+        ? `${task.videoInfo.bvid}-${task.videoInfo.cid}-p${task.videoInfo.p || 1}`
+        : null;
+      const currentVideoKey = `${videoInfo.bvid}-${videoInfo.cid}-p${videoInfo.p || 1}`;
+      
+      if (taskVideoKey === currentVideoKey && 
+          task.type === 'ai_summary') {
+        return task;
+      }
+    }
+    return null;
+  }
+
+  /**
    * 执行总结任务
    * @private
    */
   async _executeSummaryTask(subtitleData, aiConfig, headers, pureSubtitleText, timestampedSubtitleText, taskContext) {
     try {
       const { videoInfo, signal } = taskContext;
+      const taskStartTime = performance.now(); // 记录任务开始时间
       
-      // 检查是否需要广告检测
-      const videoDuration = document.querySelector('video')?.duration || 0;
-      const shouldDetectAds = videoDuration > 300; // 超过5分钟的视频才检测广告
+      this.log.info('开始AI总结任务');
 
         // 准备请求数组
-        const aiRequests = [
-          // 第一个请求：Markdown格式总结（使用纯字幕文本）
-          this._makeAIRequest(aiConfig, headers, pureSubtitleText, aiConfig.prompt1 || this._getDefaultPrompt1(), 'markdown'),
-          // 第二个请求：JSON格式段落（使用带时间戳的字幕文本）
-          this._makeAIRequest(aiConfig, headers, timestampedSubtitleText, aiConfig.prompt2 || this._getDefaultPrompt2(), 'json')
-        ];
-
-        // 如果需要，添加广告检测请求
-        if (shouldDetectAds) {
-          aiRequests.push(
-            // 第三个请求：广告检测（使用带时间戳的字幕文本）
-            this._makeAIRequest(aiConfig, headers, timestampedSubtitleText, this._getAdDetectionPrompt(), 'ads')
-          );
-        }
-
-        // 并行执行所有AI请求（传入signal以支持取消）
-      const results = await Promise.race([
-        Promise.all(aiRequests),
-        new Promise((_, reject) => {
-          signal.addEventListener('abort', () => reject(new Error('Task aborted')));
-        })
-      ]);
+        // 第一个请求：Markdown格式总结（单独获取）
+        this.log.info('=== 第一部分：视频总结（Markdown格式）===');
+        this.log.debug('使用提示词类型: markdown总结');
+        this.log.debug('字幕文本长度:', pureSubtitleText.length, '字符');
         
-        // 组合结果
+        const markdownRequest = this._makeAIRequest(
+          aiConfig, 
+          headers, 
+          pureSubtitleText, 
+          aiConfig.prompt1 || this._getDefaultPrompt1(), 
+          'markdown'
+        );
+
+        // 第二个请求：JSON格式段落总结（包含广告检测）
+        this.log.info('=== 第二部分：段落总结（含广告检测）===');
+        this.log.debug('使用提示词类型: 段落总结+广告检测');
+        this.log.debug('字幕文本长度:', timestampedSubtitleText.length, '字符');
+        
+        const segmentsRequest = this._makeAIRequest(
+          aiConfig, 
+          headers, 
+          timestampedSubtitleText, 
+          aiConfig.prompt2 || this._getDefaultPrompt2(), 
+          'segments'
+        );
+
+        // 并行执行两个AI请求（传入signal以支持取消）
+        this.log.info('并行执行两个AI请求...');
+        const results = await Promise.race([
+          Promise.all([markdownRequest, segmentsRequest]),
+          new Promise((_, reject) => {
+            signal.addEventListener('abort', () => reject(new Error('Task aborted')));
+          })
+        ]);
+        
+        // 计算总耗时
+        const taskDuration = performance.now() - taskStartTime;
+        logger.debug('计时', `AI总结 - 总耗时: ${taskDuration.toFixed(2)}ms`);
+        
+        // 第一个请求返回：Markdown总结
+        const markdownSummary = results[0];
+        this.log.info('✅ 第一部分完成：Markdown总结');
+        this.log.debug('Markdown总结长度:', markdownSummary?.length || 0, '字符');
+        
+        // 第二个请求返回：段落数组（可能包含广告段落）
+        const allSegments = results[1];
+        this.log.info('✅ 第二部分完成：段落总结');
+        
+        // 从segments中分离普通段落和广告段落
+        const segments = [];
+        const ads = [];
+        
+        for (const segment of allSegments) {
+          if (segment.title === '广告') {
+            // 这是广告段落，转换为广告格式
+            const adStartTime = this._parseTimeToSeconds(segment.timestamp);
+            // 假设广告持续30秒（如果AI没有提供结束时间）
+            const adEndTime = adStartTime + 30;
+            
+            ads.push({
+              segment: [adStartTime, adEndTime],
+              category: 'sponsor',
+              product: segment.summary?.substring(0, 20) || '广告',
+              description: segment.summary || ''
+            });
+            
+            this.log.debug('检测到广告段落:', segment.timestamp, '-', segment.summary);
+          } else {
+            // 普通段落
+            segments.push(segment);
+          }
+        }
+        
+        this.log.debug('普通段落数量:', segments.length);
+        this.log.debug('广告段落数量:', ads.length);
+        
+        if (segments.length > 0) {
+          this.log.trace('段落总结详情:', segments.slice(0, 3)); // 只显示前3个
+        }
+        
+        if (ads.length > 0) {
+          this.log.info('检测到广告段落:', ads.length, '个');
+          this.log.trace('广告段落详情:', ads);
+        }
+        
+        // 组合最终结果
         const combinedResult = {
-          markdown: results[0],
-          segments: results[1],
-          ads: shouldDetectAds ? results[2] : []
+          markdown: markdownSummary,
+          segments: segments,
+          ads: ads
         };
         
-        // 验证两个AI总结是否都成功
-        if (!combinedResult.markdown || !combinedResult.segments) {
-          throw new Error('AI总结不完整：markdown或segments缺失');
+        // 验证AI总结是否完整
+        if (!combinedResult.markdown) {
+          throw new Error('AI总结不完整：markdown总结缺失');
         }
         
-        // 调试日志
-        this.log.debug('Markdown总结长度:', combinedResult.markdown?.length || 0);
-        this.log.debug('段落数量:', combinedResult.segments?.length || 0);
-        this.log.trace('段落详情:', combinedResult.segments);
-        
-        if (combinedResult.segments.length === 0) {
+        if (!combinedResult.segments || combinedResult.segments.length === 0) {
           this.log.warn('段落总结为空，请检查AI返回内容');
         }
         
         if (combinedResult.ads && combinedResult.ads.length > 0) {
-          this.log.info('检测到广告段落:', combinedResult.ads.length);
           // 将广告段落添加到进度条标记
           this._applyAdSegments(combinedResult.ads);
         }
+        
+        this.log.success('AI总结任务完成');
+        this.log.info('总结:', markdownSummary?.substring(0, 50) + '...');
+        this.log.info('段落数:', segments.length, '广告数:', ads.length);
 
         // 完成总结（使用任务中的固定视频信息）
       state.finishAISummary(combinedResult);
       
-      // 保存到笔记（使用任务中的固定视频信息）
-      try {
-        const summaryNote = notesService.addAISummary({
-          summary: combinedResult.markdown,
-          segments: combinedResult.segments,
-          videoInfo: videoInfo,
-          videoBvid: videoInfo.bvid
-        });
-        this.log.success('任务完成，已保存到笔记，笔记ID:', summaryNote.id);
-      } catch (error) {
-        this.log.error('保存AI总结到笔记失败:', error);
-      }
+      // 注意：AI总结不应该保存到"我的笔记"中
+      // "我的笔记"只保存用户主动选中并点击钢笔添加的内容
       
       // 后台发送到Notion（使用任务中的固定视频信息）
       try {
@@ -291,7 +434,7 @@ class AIService {
    * @param {Object} headers - 请求头
    * @param {string} subtitleText - 字幕文本
    * @param {string} prompt - 提示词
-   * @param {string} type - 请求类型 (markdown/json)
+   * @param {string} type - 请求类型 (markdown/segments)
    * @returns {Promise<string|Array>}
    */
   async _makeAIRequest(aiConfig, headers, subtitleText, prompt, type) {
@@ -308,6 +451,9 @@ class AIService {
 
     if (type === 'markdown') {
       // 使用流式请求处理Markdown总结
+      this.log.debug('发送Markdown总结请求（流式）');
+      const start = performance.now();
+      
       const summaryPromise = this._streamingRequest(aiConfig.url, headers, requestBody);
       
       // 添加超时保护
@@ -317,10 +463,16 @@ class AIService {
         'Markdown总结超时，请稍后重试'
       );
       
+      const duration = performance.now() - start;
+      logger.debug('计时', `AI总结 - Prompt1 (Markdown格式): ${duration.toFixed(2)}ms`);
+      
       // 清理markdown内容：如果被代码块包裹，提取出来
       return this._cleanMarkdownContent(markdownContent);
-    } else {
-      // JSON和广告检测请求使用非流式响应
+    } else if (type === 'segments') {
+      // 段落总结请求（非流式响应，包含广告检测）
+      this.log.debug('发送段落总结请求（非流式，含广告检测）');
+      const start = performance.now();
+      
       const response = await fetch(aiConfig.url, {
         method: 'POST',
         headers: headers,
@@ -330,19 +482,21 @@ class AIService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[AIService] ${type} API错误响应:`, errorText);
-        throw new Error(`${type}请求失败: ${response.status} ${response.statusText}`);
+        this.log.error('段落总结API错误响应:', errorText);
+        throw new Error(`段落总结请求失败: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
       const content = data.choices?.[0]?.message?.content || '';
       
-      // 根据类型解析响应
-      if (type === 'json') {
-        return this._parseJSONResponse(content);
-      } else if (type === 'ads') {
-        return this._parseAdResponse(content);
-      }
+      const duration = performance.now() - start;
+      logger.debug('计时', `AI总结 - Prompt2 (段落+广告): ${duration.toFixed(2)}ms`);
+      
+      this.log.debug('收到AI响应，原始内容长度:', content.length, '字符');
+      this.log.trace('AI响应原始内容前200字符:', content.substring(0, 200));
+      
+      // 解析JSON响应，返回段落数组（可能包含title为"广告"的段落）
+      return this._parseJSONResponse(content);
     }
   }
 
@@ -560,83 +714,247 @@ class AIService {
     return `请用中文总结以下视频字幕内容，使用Markdown格式输出。
 
 要求：
-1. 第一行使用 # 标题，简洁概括视频主题
-2. 第二部分使用 ## TL;DR 作为标题，提供2-3句话的核心摘要
-3. 第三部分使用 --- 分隔线
-4. 后续内容按主题使用 ### 三级标题分段
-5. 使用项目符号 - 列出要点
-6. 不要在总结中包含任何时间戳
-7. 直接输出Markdown内容，不要使用代码块包裹（不要使用\`\`\`）
+1. 在开头提供TL;DR（不超过50字的核心摘要）
+2. 使用标题、列表等Markdown格式组织内容
+3. 突出关键信息和要点
+4. 总分结构，分段表示哪部分讲什么内容
 
-字幕内容：
+字幕内容如下：
 `;
   }
 
   /**
-   * 获取JSON格式的默认提示词
+   * 获取JSON格式的默认提示词（包含广告检测）
    * @private
    * @returns {string}
    */
   _getDefaultPrompt2() {
-    return `分析以下带时间戳的字幕，提取5-8个关键段落。
+    return `分析以下带时间戳的字幕，提取关键段落。
 
-重要：
-1. 你的回复必须是一个完整且有效的JSON
-2. 不要有任何其他文字、解释或markdown标记
-3. 直接以{开始，以}结束
-4. 数组元素之间必须用逗号分隔
+重要：你的回复必须只包含JSON，不要有任何其他文字、解释或markdown标记。
 
-JSON格式要求（注意逗号）：
-{
-  "segments": [
-    {"timestamp":"分钟:秒","title":"标题(10字内)","summary":"内容总结(30-50字)"},
-    {"timestamp":"分钟:秒","title":"标题(10字内)","summary":"内容总结(30-50字)"}
-  ]
-}
+直接以{开始，以}结束。
 
-正确示例（特别注意元素之间的逗号）：
+JSON格式要求：
+{"segments":[
+  {"timestamp":"分钟:秒","title":"标题(10字内)","summary":"内容总结(30-50字)"}
+]}
+
+示例（你的回复应该像这样）：
 {"segments":[{"timestamp":"00:15","title":"开场介绍","summary":"主持人介绍今天的主题和嘉宾背景"},{"timestamp":"02:30","title":"核心观点","summary":"讨论技术发展趋势和未来展望"}]}
+
+特别注意：如果视频中存在商业广告推广内容（明确提及产品名称、品牌、购买链接等），请在对应位置添加一个段落，title固定为"广告"，timestamp为广告开始时间，summary简述广告内容。
+
+包含广告的示例：
+{"segments":[{"timestamp":"00:15","title":"开场介绍","summary":"主持人介绍今天的主题"},{"timestamp":"02:30","title":"广告","summary":"推广某品牌手机，介绍功能和优惠"},{"timestamp":"04:00","title":"核心观点","summary":"讨论技术发展趋势"}]}
 
 字幕内容：
 `;
   }
 
   /**
-   * 获取广告检测的提示词
+   * 获取合并的提示词（段落总结 + 广告分析）
+   * @private
+   * @param {Object} aiConfig - AI配置
+   * @param {boolean} shouldDetectAds - 是否检测广告
+   * @returns {string}
+   */
+  _getCombinedPrompt(aiConfig, shouldDetectAds) {
+    const segmentsPrompt = aiConfig.prompt2 || this._getDefaultPrompt2();
+    
+    if (!shouldDetectAds) {
+      // 如果不检测广告，只返回段落总结提示词
+      return segmentsPrompt;
+    }
+    
+    // 如果检测广告，合并两个提示词
+    const adsPrompt = this._getAdDetectionPrompt();
+    
+    return `分析以下带时间戳的视频字幕，需要完成两个任务：
+
+【任务1：段落总结】
+${segmentsPrompt}
+
+【任务2：广告检测】
+${adsPrompt}
+
+【重要：返回格式说明】
+你必须返回一个完整的JSON对象，包含两个字段：
+1. "segments": 段落总结数组（来自任务1）
+2. "ads": 广告段落数组（来自任务2）
+
+如果检测到广告，ads数组包含广告信息；如果没有广告，ads为空数组[]。
+
+返回格式示例：
+{
+  "segments": [
+    {"timestamp":"00:15","title":"开场介绍","summary":"主持人介绍今天的主题和嘉宾背景"},
+    {"timestamp":"02:30","title":"核心观点","summary":"讨论技术发展趋势和未来展望"}
+  ],
+  "ads": [
+    {"start":"05:20","end":"06:45","product":"某品牌手机","description":"介绍手机功能和购买优惠"}
+  ]
+}
+
+如果没有广告，ads为空数组：
+{
+  "segments": [...],
+  "ads": []
+}
+
+重要：
+- 只返回JSON格式，不要有其他文字
+- segments和ads都是数组
+- ads数组中的每个对象包含start、end、product、description字段
+
+字幕内容：
+`;
+  }
+
+  /**
+   * 获取广告检测的提示词（仅用于参考，实际已合并到_getCombinedPrompt）
    * @private
    * @returns {string}
    */
   _getAdDetectionPrompt() {
-    return `分析以下视频字幕，识别是否存在对特定产品或品牌的硬性广告推广介绍。
+    return `识别是否存在对特定产品或品牌的硬性广告推广介绍。
 
 判断标准：
 1. 明确提及产品名称、品牌或服务
 2. 包含推广性描述（如功能介绍、优惠信息、购买链接等）
 3. 明显的商业推广意图
 
-如果没有检测到广告，返回：
-{"hasAds":false,"segments":[]}
+如果没有检测到广告，返回空数组[]。
 
-如果检测到广告，返回广告时间段，格式为：
-{"hasAds":true,"segments":[{"start":"分钟:秒","end":"分钟:秒","product":"产品名称","description":"广告内容简述"}]}
+如果检测到广告，返回广告时间段数组，格式为：
+[{"start":"分钟:秒","end":"分钟:秒","product":"产品名称","description":"广告内容简述"}]
 
 示例：
-{"hasAds":true,"segments":[{"start":"02:15","end":"03:45","product":"某品牌手机","description":"介绍手机功能和购买优惠"}]}
-
-重要：只返回JSON格式，不要有其他文字。
-
-字幕内容：
-`;
+[{"start":"02:15","end":"03:45","product":"某品牌手机","description":"介绍手机功能和购买优惠"}]`;
   }
 
   /**
-   * 解析广告检测响应
+   * 解析合并响应（段落总结 + 广告分析）
+   * @private
+   * @param {string} content - AI返回的内容
+   * @returns {Object} 包含segments和ads的对象
+   */
+  _parseSegmentsAndAdsResponse(content) {
+    this.log.trace('解析段落总结+广告分析响应，原始内容长度:', content?.length || 0);
+    
+    try {
+      // 清理内容
+      let cleanContent = content.trim();
+      
+      // 如果内容被包裹在代码块中，提取出来
+      if (cleanContent.includes('```json')) {
+        const match = cleanContent.match(/```json\s*([\s\S]*?)```/);
+        if (match) {
+          cleanContent = match[1].trim();
+          this.log.trace('从json代码块中提取内容');
+        }
+      } else if (cleanContent.includes('```')) {
+        const match = cleanContent.match(/```\s*([\s\S]*?)```/);
+        if (match) {
+          cleanContent = match[1].trim();
+          this.log.trace('从代码块中提取内容');
+        }
+      }
+      
+      // 尝试提取JSON部分
+      const jsonMatch = cleanContent.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        this.log.trace('找到JSON匹配，解析中...');
+        
+        // 修复常见的JSON格式问题
+        let fixedJson = jsonMatch[0];
+        
+        // 修复数组元素之间缺少逗号的问题
+        fixedJson = fixedJson.replace(/\}\s*\{/g, '},{');
+        
+        // 修复多余的逗号
+        fixedJson = fixedJson.replace(/,\s*\]/g, ']');
+        fixedJson = fixedJson.replace(/,\s*\}/g, '}');
+        
+        let json;
+        try {
+          json = JSON.parse(fixedJson);
+        } catch (firstError) {
+          this.log.debug('修复后的JSON仍然解析失败，尝试原始内容');
+          json = JSON.parse(jsonMatch[0]);
+        }
+        
+        // 解析段落总结
+        const segments = Array.isArray(json.segments) ? json.segments : (Array.isArray(json) ? json : []);
+        const parsedSegments = segments.map(segment => ({
+          timestamp: this._normalizeTimestamp(segment.timestamp),
+          title: segment.title || '',
+          summary: segment.summary || ''
+        }));
+        
+        this.log.debug('解析段落总结数量:', parsedSegments.length);
+        
+        // 解析广告分析
+        let parsedAds = [];
+        if (json.ads && Array.isArray(json.ads)) {
+          // 新格式：直接使用ads数组
+          parsedAds = json.ads.map(ad => {
+            const startTime = this._parseTimeToSeconds(ad.start);
+            const endTime = this._parseTimeToSeconds(ad.end);
+            return {
+              segment: [startTime, endTime],
+              category: 'sponsor',
+              product: ad.product || '',
+              description: ad.description || ''
+            };
+          });
+        } else if (json.hasAds && Array.isArray(json.segments)) {
+          // 兼容旧格式：hasAds + segments
+          parsedAds = json.segments.map(segment => {
+            const startTime = this._parseTimeToSeconds(segment.start);
+            const endTime = this._parseTimeToSeconds(segment.end);
+            return {
+              segment: [startTime, endTime],
+              category: 'sponsor',
+              product: segment.product || '',
+              description: segment.description || ''
+            };
+          });
+        }
+        
+        this.log.debug('解析广告段落数量:', parsedAds.length);
+        
+        if (parsedSegments.length === 0) {
+          this.log.warn('段落总结为空，请检查AI返回内容');
+        }
+        
+        return {
+          segments: parsedSegments,
+          ads: parsedAds
+        };
+      } else {
+        this.log.warn('响应中没有找到JSON格式内容，原始内容前200字符:', cleanContent.substring(0, 200));
+      }
+    } catch (e) {
+      this.log.error('段落总结+广告分析解析失败:', e);
+      this.log.trace('解析失败的内容前200字符:', content?.substring(0, 200));
+    }
+    
+    // 解析失败时返回空结果
+    return {
+      segments: [],
+      ads: []
+    };
+  }
+
+  /**
+   * 解析广告检测响应（已废弃，保留用于兼容）
    * @private
    * @param {string} content - AI返回的内容
    * @returns {Array} 解析后的广告段落数组
    */
   _parseAdResponse(content) {
-    this.log.trace('解析广告检测响应，原始内容长度:', content?.length || 0);
+    this.log.trace('解析广告检测响应（旧方法），原始内容长度:', content?.length || 0);
     
     try {
       // 清理内容

@@ -16,7 +16,6 @@ import uiRenderer from './UIRenderer.js';
 import notesPanel from './NotesPanel.js';
 import modalManager from '../utils/ModalManager.js';
 import domCache from '../utils/DOMCache.js';
-import searchIndex from '../utils/SearchIndex.js';
 import { SELECTORS, AI_API_KEY_URLS } from '../constants.js';
 import logger from '../utils/DebugLogger.js';
 import { debounce, throttleRAF, findSubtitleIndex } from '../utils/helpers.js';
@@ -34,17 +33,10 @@ class EventHandlers {
     this.resizeStartY = 0;
     this.resizeStartWidth = 0;
     this.resizeStartHeight = 0;
-    // Search related state
-    this.searchMatches = [];
-    this.currentMatchIndex = -1;
-    this.searchTerm = '';
-    this.lastSearchTerm = ''; // 用于增量搜索
-    this.searchIndexBuilt = false; // 索引是否已构建
     // Subtitle highlight optimization
     this.subtitleDataCache = null;
     this.currentHighlightedIndex = -1;
     // Debounced/throttled functions
-    this.debouncedSearch = null;
     this.throttledHighlight = null;
     // 模态框代理对象（用于ModalManager）
     this.aiConfigModalProxy = {
@@ -59,15 +51,6 @@ class EventHandlers {
     };
   }
 
-  /**
-   * 初始化搜索索引
-   */
-  initializeSearchIndex(subtitleData) {
-    if (subtitleData && subtitleData.length > 0) {
-      searchIndex.buildIndex(subtitleData);
-      this.searchIndexBuilt = true;
-    }
-  }
 
   /**
    * 绑定字幕面板事件
@@ -97,35 +80,7 @@ class EventHandlers {
       });
     }
 
-    // 标签页切换
-    const tabs = container.querySelectorAll('.subtitle-tab');
-    const panels = container.querySelectorAll('.subtitle-panel');
-    
-    tabs.forEach(tab => {
-      tab.addEventListener('click', () => {
-        const targetTab = tab.getAttribute('data-tab');
-        
-        // 更新标签激活状态
-        tabs.forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        
-        panels.forEach(panel => {
-          if (panel.id === `${targetTab}-panel`) {
-            panel.style.display = 'block';
-            
-            // 如果切换到字幕列表标签，初始化滚动管理器
-            if (targetTab === 'subtitles') {
-              const subtitleListContainer = panel.querySelector('#subtitle-list-container');
-              if (subtitleListContainer && !subtitleScrollManager.container) {
-                this.initSubtitleScroll(subtitleListContainer);
-              }
-            }
-          } else {
-            panel.style.display = 'none';
-          }
-        });
-      });
-    });
+    // 标签页切换（已移除字幕列表标签页，保留代码以兼容）
 
     // AI总结按钮（同时生成总结和段落）
     const aiIcon = container.querySelector('.ai-icon');
@@ -161,11 +116,7 @@ class EventHandlers {
           const confirmRegenerate = confirm('已存在AI总结，是否重新生成？\n\n点击"确定"重新生成\n点击"取消"查看现有总结');
           
           if (!confirmRegenerate) {
-            // 用户选择查看现有总结，切换到总结标签页
-            const summaryTab = container?.querySelector('.subtitle-tab[data-tab="summary"]');
-            if (summaryTab) {
-              summaryTab.click();
-            }
+            // 用户选择查看现有总结，直接返回
             return;
           }
           
@@ -179,12 +130,6 @@ class EventHandlers {
         try {
           // 触发AI总结（会同时生成markdown总结和JSON段落，手动触发）
           await aiService.summarize(subtitleData, true);
-          
-          // 自动切换到总结标签页
-          const summaryTab = container?.querySelector('.subtitle-tab[data-tab="summary"]');
-          if (summaryTab) {
-            summaryTab.click();
-          }
         } catch (error) {
           notification.handleError(error, 'AI总结');
         }
@@ -247,6 +192,18 @@ class EventHandlers {
           const videoKey = state.getVideoKey();
           const aiSummary = videoKey ? state.getAISummary(videoKey) : null;
           
+          // 检查是否已经有Notion页面
+          const existingPageId = state.getNotionPageId(videoKey);
+          if (existingPageId) {
+            // 已存在Notion页面，询问用户操作
+            const confirmUpdate = confirm('该视频已经发送到Notion。\n\n点击"确定"更新现有页面\n点击"取消"创建新页面');
+            
+            if (!confirmUpdate) {
+              // 用户选择创建新页面，清除现有页面ID
+              state.setNotionPageId(videoKey, null);
+            }
+          }
+          
           // 获取内容配置选项
           const contentOptions = config.getNotionContentOptions();
           
@@ -261,48 +218,7 @@ class EventHandlers {
       });
     }
 
-    // 初始化字幕滚动
-    const subtitleListContainer = container.querySelector('#subtitle-list-container');
-    if (subtitleListContainer) {
-      this.initSubtitleScroll(subtitleListContainer);
-    }
-
-    // 搜索输入框 - 使用防抖优化
-    const searchInput = container.querySelector('#subtitle-search-input');
-    if (searchInput) {
-      // 创建防抖函数（300ms）
-      if (!this.debouncedSearch) {
-        this.debouncedSearch = debounce((container, value) => {
-          this.handleSearch(container, value);
-        }, 300);
-      }
-      
-      searchInput.addEventListener('input', (e) => {
-        this.debouncedSearch(container, e.target.value);
-      });
-      
-      // 回车键循环跳转到下一个匹配项
-      searchInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault(); // 阻止默认行为
-          this.navigateSearch(container, 1); // 跳转到下一个匹配项
-        }
-      });
-    }
-
-    // 搜索导航按钮
-    const prevBtn = container.querySelector('#search-prev');
-    const nextBtn = container.querySelector('#search-next');
-    if (prevBtn) {
-      prevBtn.addEventListener('click', () => {
-        this.navigateSearch(container, -1);
-      });
-    }
-    if (nextBtn) {
-      nextBtn.addEventListener('click', () => {
-        this.navigateSearch(container, 1);
-      });
-    }
+    // 初始化字幕滚动（已移除字幕列表，不再需要）
 
     // 使用事件委托处理字幕项点击、段落点击和保存按钮（优化：减少事件监听器）
     container.addEventListener('click', (e) => {
@@ -408,12 +324,11 @@ class EventHandlers {
     if (!header) return;
 
     header.addEventListener('mousedown', (e) => {
-      // 如果点击的是按钮或搜索框，不触发拖拽
+      // 如果点击的是按钮，不触发拖拽
       if (e.target.closest('.subtitle-close') || 
           e.target.closest('.ai-icon') || 
           e.target.closest('.download-icon') || 
-          e.target.closest('.notion-icon') ||
-          e.target.closest('.subtitle-search-container')) {
+          e.target.closest('.notion-icon')) {
         return;
       }
 
@@ -609,200 +524,6 @@ class EventHandlers {
     this.currentHighlightedIndex = targetIndex;
   }
 
-  /**
-   * 处理搜索功能（集成性能监控和搜索索引）
-   * @param {HTMLElement} container - 字幕容器
-   * @param {string} searchTerm - 搜索词
-   */
-  handleSearch(container, searchTerm) {
-    this.searchTerm = searchTerm.trim();
-    
-    // 清除之前的高亮
-    this.clearSearchHighlights(container);
-    
-    if (!this.searchTerm) {
-      this.updateSearchCounter(0, 0);
-      this.lastSearchTerm = '';
-      return;
-    }
-
-    // 构建搜索索引（首次搜索时）
-    if (!this.searchIndexBuilt) {
-      const subtitleData = state.getSubtitleData();
-      if (subtitleData) {
-        searchIndex.buildIndex(subtitleData);
-        this.searchIndexBuilt = true;
-      }
-    }
-
-    // 在AI总结和字幕中搜索并高亮
-    this.searchMatches = [];
-    this.highlightSearchInContainer(container);
-    
-    // 更新计数器
-    this.updateSearchCounter(
-      this.searchMatches.length > 0 ? 1 : 0,
-      this.searchMatches.length
-    );
-    
-    // 如果有匹配，跳转到第一个
-    if (this.searchMatches.length > 0) {
-      this.currentMatchIndex = 0;
-      this.scrollToMatch(this.searchMatches[0]);
-    }
-
-    this.lastSearchTerm = this.searchTerm;
-  }
-
-  /**
-   * 在容器中高亮搜索词
-   * @param {HTMLElement} container - 字幕容器
-   */
-  highlightSearchInContainer(container) {
-    const contentDiv = container.querySelector('.subtitle-content');
-    if (!contentDiv) return;
-
-    // 搜索AI总结
-    const summarySection = contentDiv.querySelector('.ai-summary-section');
-    if (summarySection) {
-      const summaryContent = summarySection.querySelector('.ai-summary-content');
-      if (summaryContent) {
-        this.highlightInElement(summaryContent, this.searchTerm);
-      }
-    }
-
-    // 搜索字幕
-    const subtitleItems = contentDiv.querySelectorAll('.subtitle-item');
-    subtitleItems.forEach(item => {
-      const textElement = item.querySelector('.subtitle-text');
-      if (textElement) {
-        this.highlightInElement(textElement, this.searchTerm);
-      }
-    });
-  }
-
-  /**
-   * 在元素中高亮搜索词
-   * @param {HTMLElement} element - 目标元素
-   * @param {string} searchTerm - 搜索词
-   */
-  highlightInElement(element, searchTerm) {
-    const originalText = element.textContent;
-    const regex = new RegExp(`(${this.escapeRegex(searchTerm)})`, 'gi');
-    const matches = originalText.match(regex);
-    
-    if (matches) {
-      let highlightedHTML = originalText.replace(regex, (match) => {
-        return `<mark class="search-highlight" data-search-match>${match}</mark>`;
-      });
-      
-      element.innerHTML = highlightedHTML;
-      
-      // 收集所有匹配元素
-      const markElements = element.querySelectorAll('mark[data-search-match]');
-      markElements.forEach(mark => {
-        this.searchMatches.push(mark);
-      });
-    }
-  }
-
-  /**
-   * 转义正则表达式特殊字符
-   * @param {string} str - 字符串
-   * @returns {string}
-   */
-  escapeRegex(str) {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
-  /**
-   * 清除搜索高亮
-   * @param {HTMLElement} container - 字幕容器
-   */
-  clearSearchHighlights(container) {
-    const marks = container.querySelectorAll('mark[data-search-match]');
-    marks.forEach(mark => {
-      const text = mark.textContent;
-      const textNode = document.createTextNode(text);
-      mark.parentNode.replaceChild(textNode, mark);
-    });
-    
-    this.searchMatches = [];
-    this.currentMatchIndex = -1;
-  }
-
-  /**
-   * 导航搜索结果
-   * @param {HTMLElement} container - 字幕容器
-   * @param {number} direction - 方向 (1: 下一个, -1: 上一个)
-   */
-  navigateSearch(container, direction) {
-    if (this.searchMatches.length === 0) return;
-
-    // 移除当前高亮
-    if (this.currentMatchIndex >= 0 && this.currentMatchIndex < this.searchMatches.length) {
-      this.searchMatches[this.currentMatchIndex].classList.remove('search-highlight-current');
-      this.searchMatches[this.currentMatchIndex].classList.add('search-highlight');
-    }
-
-    // 更新索引
-    this.currentMatchIndex += direction;
-    
-    // 循环
-    if (this.currentMatchIndex >= this.searchMatches.length) {
-      this.currentMatchIndex = 0;
-    } else if (this.currentMatchIndex < 0) {
-      this.currentMatchIndex = this.searchMatches.length - 1;
-    }
-
-    // 高亮当前匹配
-    const currentMatch = this.searchMatches[this.currentMatchIndex];
-    currentMatch.classList.remove('search-highlight');
-    currentMatch.classList.add('search-highlight-current');
-
-    // 滚动到当前匹配
-    this.scrollToMatch(currentMatch);
-
-    // 更新计数器
-    this.updateSearchCounter(this.currentMatchIndex + 1, this.searchMatches.length);
-  }
-
-  /**
-   * 滚动到匹配项
-   * @param {HTMLElement} element - 匹配元素
-   */
-  scrollToMatch(element) {
-    element.classList.add('search-highlight-current');
-    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
-
-  /**
-   * 更新搜索计数器
-   * @param {number} current - 当前索引
-   * @param {number} total - 总数
-   */
-  updateSearchCounter(current, total) {
-    const counter = document.getElementById('search-counter');
-    if (counter) {
-      counter.textContent = `${current}/${total}`;
-    }
-
-    // 显示/隐藏搜索控制
-    const searchControls = document.getElementById('search-controls');
-    if (searchControls) {
-      searchControls.style.display = total > 0 ? 'flex' : 'none';
-    }
-
-    const prevBtn = document.getElementById('search-prev');
-    const nextBtn = document.getElementById('search-next');
-    
-    if (prevBtn) {
-      prevBtn.disabled = total === 0;
-    }
-    if (nextBtn) {
-      nextBtn.disabled = total === 0;
-    }
-  }
 
   /**
    * 显示AI配置模态框
@@ -899,6 +620,9 @@ class EventHandlers {
     document.getElementById('notion-content-summary').checked = contentOptions.summary;
     document.getElementById('notion-content-segments').checked = contentOptions.segments;
     document.getElementById('notion-content-subtitles').checked = contentOptions.subtitles;
+    
+    // 加载笔记自动同步选项
+    document.getElementById('notion-notes-auto-sync').checked = config.getNotionNotesAutoSync();
     
     const statusEl = document.getElementById('notion-status-message');
     if (statusEl) statusEl.innerHTML = '';
@@ -1305,13 +1029,6 @@ class EventHandlers {
         try {
           // 触发AI总结（会同时生成markdown总结和JSON段落，手动触发）
           await aiService.summarize(subtitleData, true);
-          
-          // 自动切换到总结标签页
-          const container = document.getElementById('subtitle-container');
-          const summaryTab = container?.querySelector('.subtitle-tab[data-tab="summary"]');
-          if (summaryTab) {
-            summaryTab.click();
-          }
         } catch (error) {
           notification.handleError(error, 'AI总结');
         }
@@ -1812,6 +1529,7 @@ class EventHandlers {
       const apiKey = document.getElementById('notion-api-key').value.trim();
       const parentPageId = document.getElementById('notion-parent-page-id').value.trim();
       const autoSendEnabled = document.getElementById('notion-auto-send-enabled').checked;
+      const notesAutoSync = document.getElementById('notion-notes-auto-sync').checked;
       
       // 获取内容选项
       const contentOptions = {
@@ -1834,6 +1552,7 @@ class EventHandlers {
       const result = config.saveNotionConfig({ apiKey, parentPageId });
       if (result.success) {
         config.setNotionAutoSendEnabled(autoSendEnabled);
+        config.setNotionNotesAutoSync(notesAutoSync);
         config.saveNotionContentOptions(contentOptions);
         uiRenderer.showNotionStatus('配置已保存');
         setTimeout(() => {
@@ -1943,7 +1662,6 @@ class EventHandlers {
       // 如果点击的是按钮或输入框，不触发拖拽
       if (e.target.closest('button') || 
           e.target.closest('input') || 
-          e.target.closest('.subtitle-search-container') ||
           e.target.closest('.ai-icon') ||
           e.target.closest('.notion-icon') ||
           e.target.closest('.subtitle-close')) {

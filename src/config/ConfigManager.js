@@ -299,6 +299,38 @@ class ConfigManager {
   }
 
   /**
+   * 获取笔记自动同步开关状态
+   * @returns {boolean}
+   */
+  getNotionNotesAutoSync() {
+    return GM_getValue(STORAGE_KEYS.NOTION_NOTES_AUTO_SYNC, false);
+  }
+
+  /**
+   * 设置笔记自动同步开关状态
+   * @param {boolean} enabled
+   */
+  setNotionNotesAutoSync(enabled) {
+    GM_setValue(STORAGE_KEYS.NOTION_NOTES_AUTO_SYNC, enabled);
+  }
+
+  /**
+   * 获取笔记数据库ID
+   * @returns {string}
+   */
+  getNotionNotesDatabaseId() {
+    return GM_getValue(STORAGE_KEYS.NOTION_NOTES_DATABASE_ID, '');
+  }
+
+  /**
+   * 设置笔记数据库ID
+   * @param {string} databaseId
+   */
+  setNotionNotesDatabaseId(databaseId) {
+    GM_setValue(STORAGE_KEYS.NOTION_NOTES_DATABASE_ID, databaseId);
+  }
+
+  /**
    * 修复已存在的配置，确保prompt2使用正确的JSON格式
    * @returns {boolean} 是否进行了修复
    */

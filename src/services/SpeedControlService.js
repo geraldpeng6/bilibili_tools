@@ -16,6 +16,11 @@ const SPEED_CONFIG = {
 
 class SpeedControlService {
   constructor() {
+    // 单例模式：防止多次初始化
+    if (SpeedControlService.instance) {
+      return SpeedControlService.instance;
+    }
+    
     this.state = {
       baseSpeed: 1.0,
       isRightOptionPressed: false,
@@ -25,15 +30,27 @@ class SpeedControlService {
       optionDoubleClickTimer: null,
     };
     this.observer = null;
+    this.initialized = false;
+    
+    // 保存实例
+    SpeedControlService.instance = this;
   }
 
   /**
    * 初始化速度控制服务
    */
   init() {
+    // 防止重复初始化
+    if (this.initialized) {
+      logger.debug('SpeedControlService', '速度控制服务已初始化，跳过重复初始化');
+      return;
+    }
+    
     this.bindKeyboardEvents();
     this.observeMediaElements();
     this.applySpeedToExistingMedia();
+    this.initialized = true;
+    logger.debug('SpeedControlService', '速度控制服务初始化成功');
   }
 
   /**

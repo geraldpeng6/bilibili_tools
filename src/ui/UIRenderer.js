@@ -18,7 +18,7 @@ class UIRenderer {
 
   /**
    * 渲染字幕面板
-   * @param {Array} subtitleData - 字幕数据
+   * @param {Array} subtitleData - 字幕数据（已不再使用，保留参数以兼容）
    * @returns {string} - HTML字符串
    */
   renderSubtitlePanel(subtitleData) {
@@ -30,22 +30,6 @@ class UIRenderer {
         <div class="subtitle-header-left">
         </div>
         <div class="subtitle-header-right">
-          <div class="subtitle-search-container">
-            <input type="text" class="search-input" placeholder="搜索..." id="subtitle-search-input">
-            <div class="search-controls" id="search-controls" style="display: none;">
-              <span class="search-counter" id="search-counter">0/0</span>
-              <button class="search-nav-btn search-prev" id="search-prev" title="上一个">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <path d="M9 7.5L6 4.5L3 7.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </button>
-              <button class="search-nav-btn search-next" id="search-next" title="下一个">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <path d="M3 4.5L6 7.5L9 4.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </button>
-            </div>
-          </div>
           <div class="subtitle-header-actions">
             <span class="ai-icon" title="AI配置">
               ${ICONS.AI}
@@ -60,39 +44,9 @@ class UIRenderer {
           </div>
         </div>
       </div>
-      <div class="subtitle-tabs">
-        <div class="subtitle-tab active" data-tab="summary">视频总结</div>
-        <div class="subtitle-tab" data-tab="subtitles">字幕列表</div>
-      </div>
       <div class="subtitle-content">
         <div class="subtitle-panel" id="summary-panel" style="display: block;">
           ${this.renderAISummaryPanel(cachedSummary)}
-        </div>
-        <div class="subtitle-panel" id="subtitles-panel" style="display: none;">
-          <div class="subtitle-list-container" id="subtitle-list-container">
-            <div class="original-subtitles-section">
-              <div class="segments-header">字幕列表</div>
-    `;
-            
-    // 渲染原始字幕列表
-    subtitleData.forEach((item, index) => {
-      const startTime = formatTime(item.from);
-      html += `
-        <div class="subtitle-item" data-index="${index}" data-from="${item.from}" data-to="${item.to}">
-          <span class="subtitle-time">${startTime}</span>
-          <span class="subtitle-text">${item.content}</span>
-          <button class="save-subtitle-note-btn" data-content="${this.escapeHtml(item.content)}" title="保存为笔记">保存</button>
-        </div>
-      `;
-    });
-
-    html += `
-              </div>
-            </div>
-            <button class="subtitle-follow-btn" id="subtitle-follow-btn" style="display: none;" title="回到当前播放位置">
-              恢复滚动
-            </button>
-          </div>
         </div>
       </div>
     `;
@@ -567,6 +521,17 @@ class UIRenderer {
           </div>
           <div class="config-help" style="margin-top: 10px;">
             选择要自动添加到Notion的内容。未勾选的内容不会被发送。
+          </div>
+        </div>
+
+        <div class="config-field" style="border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 15px; margin-top: 15px;">
+          <label style="font-weight: 600; margin-bottom: 10px; display: block;">✏️ 笔记同步设置</label>
+          <label style="display: flex; align-items: center; gap: 8px;">
+            <input type="checkbox" id="notion-notes-auto-sync">
+            <span>自动同步笔记到Notion（创建独立的笔记数据库）</span>
+          </label>
+          <div class="config-help" style="margin-top: 10px;">
+            开启后，选中文字并点击钢笔保存的笔记会自动同步到Notion的独立笔记数据库中。
           </div>
         </div>
 

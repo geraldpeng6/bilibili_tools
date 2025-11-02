@@ -7,25 +7,44 @@ import logger from '../utils/DebugLogger.js';
 import LogDecorator from '../utils/LogDecorator.js';
 import eventBus from '../utils/EventBus.js';
 import { EVENTS, NOTES_CONFIG } from '../constants.js';
+import config from '../config/ConfigManager.js';
+import notionService from './NotionService.js';
+import { getVideoTitle } from '../utils/helpers.js';
 
 class NotesService {
   constructor() {
+    // 单例模式：防止多次初始化
+    if (NotesService.instance) {
+      return NotesService.instance;
+    }
+    
     // 创建模块专用日志记录器
     this.log = LogDecorator.createModuleLogger('NotesService');
     this.blueDot = null;
     this.blueDotHideTimeout = null;
     this.savedSelectionText = '';
     this.selectionTimeout = null;
+    this.initialized = false;
+    
+    // 保存实例
+    NotesService.instance = this;
   }
 
   /**
    * 初始化笔记服务
    */
   init() {
+    // 防止重复初始化
+    if (this.initialized) {
+      this.log.debug('笔记服务已初始化，跳过重复初始化');
+      return;
+    }
+    
     this.log.debug('初始化笔记服务...');
     try {
       this.createBlueDot();
       this.initSelectionListener();
+      this.initialized = true;
       this.log.success('笔记服务初始化成功');
     } catch (error) {
       this.log.error('初始化失败:', error);
@@ -178,6 +197,27 @@ class NotesService {
       this.saveNotes(notes);
       
       this.log.success(`笔记已保存，当前总数: ${notes.length}`);
+
+      // 检查是否需要自动同步到Notion
+      if (config.getNotionNotesAutoSync() && config.isNotionConfigured()) {
+        this.log.info('自动同步笔记到Notion...');
+        
+        // 添加视频信息（如果有）
+        const videoInfo = state.getVideoInfo();
+        if (videoInfo && videoInfo.bvid) {
+          // 确保有标题
+          if (!videoInfo.title) {
+            videoInfo.title = getVideoTitle();
+          }
+          note.videoInfo = videoInfo;
+        }
+
+        // 异步发送到Notion，不阻塞主流程
+        notionService.sendNoteToNotion(note).catch(error => {
+          this.log.error('自动同步到Notion失败:', error);
+        });
+      }
+
       return note;
     } catch (error) {
       this.log.error('添加笔记失败:', error);

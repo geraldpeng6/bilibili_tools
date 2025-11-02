@@ -7,7 +7,7 @@ import BaseService from './BaseService.js';
 import state from '../state/StateManager.js';
 import logger from '../utils/DebugLogger.js';
 import eventBus from '../utils/EventBus.js';
-import { EVENTS, TIMING } from '../constants.js';
+import { EVENTS, TIMING, BALL_STATUS } from '../constants.js';
 import performanceMonitor from '../utils/PerformanceMonitor.js';
 import { getVideoTitle, getVideoUrl, delay } from '../utils/helpers.js';
 
@@ -16,23 +16,36 @@ class YouTubeSubtitleService extends BaseService {
     super('YouTubeSubtitleService');
     this.capturedSubtitleUrl = null;
     this.isVideoPage = false;
+    this.interceptorSetup = false;  // 拦截器设置标志
     this.initializeService();
   }
 
   /**
-   * 初始化服务
+   * 初始化服务（延迟初始化拦截器）
    */
   initializeService() {
     // 检查是否在YouTube播放页面
     if (this.checkIsVideoPage()) {
-      logger.info('YouTubeSubtitleService', '检测到YouTube播放页面，启动字幕拦截');
-      this.setupInterceptor();
+      logger.info('YouTubeSubtitleService', '检测到YouTube播放页面，准备字幕拦截');
+      // 延迟初始化拦截器，防止在非必要时设置
+      this.ensureInterceptorSetup();
     } else {
       logger.debug('YouTubeSubtitleService', '非YouTube播放页面，跳过字幕拦截');
     }
 
     // 监听页面变化（YouTube是SPA）
     this.observePageChanges();
+  }
+
+  /**
+   * 确保拦截器已设置（懒加载）
+   */
+  ensureInterceptorSetup() {
+    if (!this.interceptorSetup && this.checkIsVideoPage()) {
+      logger.debug('YouTubeSubtitleService', '首次设置字幕拦截器');
+      this.setupInterceptor();
+      this.interceptorSetup = true;
+    }
   }
 
   /**
@@ -232,14 +245,14 @@ class YouTubeSubtitleService extends BaseService {
 
         // 保存数据
         state.setSubtitleData(subtitleData);
-        state.setBallStatus('active');
+        state.setBallStatus(BALL_STATUS.ACTIVE);
         eventBus.emit(EVENTS.SUBTITLE_LOADED, subtitleData, state.getVideoKey());
 
         logger.success('YouTubeSubtitleService', `字幕处理成功，共 ${subtitleData.length} 条`);
 
       } catch (error) {
         logger.error('YouTubeSubtitleService', '字幕处理失败:', error);
-        state.setBallStatus('error');
+        state.setBallStatus(BALL_STATUS.ERROR);
         eventBus.emit(EVENTS.SUBTITLE_FAILED, error.message);
       } finally {
         state.finishRequest();
@@ -280,14 +293,14 @@ class YouTubeSubtitleService extends BaseService {
 
         // 保存数据
         state.setSubtitleData(subtitleData);
-        state.setBallStatus('active');
+        state.setBallStatus(BALL_STATUS.ACTIVE);
         eventBus.emit(EVENTS.SUBTITLE_LOADED, subtitleData, state.getVideoKey());
 
         logger.success('YouTubeSubtitleService', `字幕获取成功，共 ${subtitleData.length} 条`);
 
       } catch (error) {
         logger.error('YouTubeSubtitleService', '字幕获取失败:', error);
-        state.setBallStatus('error');
+        state.setBallStatus(BALL_STATUS.ERROR);
         eventBus.emit(EVENTS.SUBTITLE_FAILED, error.message);
       } finally {
         state.finishRequest();

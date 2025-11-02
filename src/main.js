@@ -53,12 +53,14 @@ const IS_YOUTUBE = location.hostname.includes('youtube.com') || location.hostnam
 class BilibiliSubtitleExtractor {
   constructor() {
     this.initialized = false;
+    this.initializing = false;  // 并发初始化保护标志
     this.ball = null;
     this.container = null;
     this.videoQualityService = null;
     this.universalAdSkipService = null;
     this.isBilibili = IS_BILIBILI;
     this.isYouTube = IS_YOUTUBE;
+    this.isPlatformSupported = false;  // 是否为支持的平台
   }
 
   /**
@@ -126,91 +128,135 @@ class BilibiliSubtitleExtractor {
   }
 
   /**
-   * 初始化应用
+   * 初始化应用（分层架构）
+   * Layer 0: iframe检测（已在IIFE中完成）
+   * Layer 1: 通用服务（所有网站）
+   * Layer 2: 平台专属服务（B站/YouTube）
    */
   async init() {
-    if (this.initialized) return;
-
-    // 设置全局错误处理，防止其他扩展的错误影响本脚本
-    this.setupErrorHandler();
-
-    // 初始化平台服务
-    platformService.init();
-    const currentSubtitleService = platformService.getSubtitleService();
-
-    // 注入样式
-    injectStyles();
-
-    // 等待页面加载
-    await this.waitForPageReady();
-
-    // 修复已存在的配置中错误的prompt2（仅B站需要）
-    if (this.isBilibili) {
-      config.fixExistingConfigPrompts();
+    // 双重检查，防止重复初始化
+    if (this.initialized) {
+      logger.info('Main', '应用已初始化，跳过重复执行');
+      return;
     }
 
-    // === 通用功能初始化 - 所有网站都可用 ===
-    // 初始化笔记服务 - 所有网站都可以选中文字保存笔记
-    notesService.init();
+    // 并发初始化保护
+    if (this.initializing) {
+      logger.warn('Main', '应用正在初始化中，跳过重复调用');
+      return;
+    }
+    this.initializing = true;
 
-    // 初始化速度控制服务 - 所有网站的视频都可以控制速度
-    speedControlService.init();
+    try {
+      // 设置全局错误处理，防止其他扩展的错误影响本脚本
+      this.setupErrorHandler();
 
-    // 初始化截图服务 - 所有网站的视频都可以截图
-    // screenshotService 已在导入时初始化
+      // 检测平台类型
+      this.isPlatformSupported = this.isBilibili || this.isYouTube;
+      logger.info('Main', `平台检测: ${this.isBilibili ? 'Bilibili' : this.isYouTube ? 'YouTube' : '通用模式'}`);
 
+      // ========== Layer 1: 通用服务初始化（所有网站）==========
+      logger.info('Main', '初始化通用服务（速度控制、笔记、截图）...');
+      
+      // 注入基础样式
+      injectStyles();
+      
+      // 初始化笔记服务 - 所有网站都可以选中文字保存笔记
+      notesService.init();
+      
+      // 初始化速度控制服务 - 所有网站的视频都可以控制速度
+      speedControlService.init();
+      
+      // 截图服务已在导入时初始化，所有网站的视频都可以截图
+      
+      // 注册通用快捷键（所有网站可用）
+      this.registerUniversalShortcuts();
+      
+      // 注册通用油猴菜单（所有网站可用）
+      this.registerUniversalMenuCommands();
+
+      // ========== Layer 2: 平台专属服务（仅B站/YouTube）==========
+      if (this.isPlatformSupported) {
+        logger.info('Main', `初始化平台专属服务: ${this.isBilibili ? 'Bilibili' : 'YouTube'}...`);
+        
+        // 初始化平台服务
+        platformService.init();
+        
+        // 等待页面加载
+        await this.waitForPageReady();
+        
+        // 修复已存在的配置中错误的prompt2（仅B站需要）
+        if (this.isBilibili) {
+          config.fixExistingConfigPrompts();
+        }
+        
+        // 初始化平台特定服务
+        await this.initPlatformServices();
+        
+        // 创建UI元素（字幕面板、小球等）
+        if (this.isBilibili || (this.isYouTube && location.pathname === '/watch')) {
+          this.createUI();
+        }
+        
+        // 绑定事件
+        this.bindEvents();
+        
+        // 设置自动化逻辑
+        if (this.isBilibili || (this.isYouTube && location.pathname === '/watch')) {
+          this.setupAutomation();
+        }
+        
+        // 注册平台专属菜单
+        this.registerPlatformMenuCommands();
+        
+        // 监听视频切换
+        if (this.isBilibili) {
+          subtitleService.checkSubtitleButton();
+          this.observeVideoChange();
+        } else if (this.isYouTube && location.pathname === '/watch') {
+          // YouTube播放页面字幕检测
+          const currentSubtitleService = platformService.getSubtitleService();
+          if (currentSubtitleService) {
+            setTimeout(async () => {
+              await currentSubtitleService.checkSubtitleAvailability();
+            }, 2000);
+          }
+          this.observeVideoChange();
+        }
+      } else {
+        logger.info('Main', '通用模式：仅提供速度控制、笔记、截图功能');
+      }
+
+      this.initialized = true;
+      logger.info('Main', '✅ 应用初始化完成');
+      
+    } catch (error) {
+      logger.error('Main', '初始化失败:', error);
+    } finally {
+      this.initializing = false;
+    }
+  }
+
+  /**
+   * 初始化平台专属服务（B站和YouTube）
+   * @private
+   */
+  async initPlatformServices() {
     if (this.isBilibili) {
-      // SponsorBlock 初始化（非关键功能，错误不影响主流程）
+      // SponsorBlock 初始化（非关键功能）
       try {
         await sponsorBlockService.init();
+        this.videoQualityService = createVideoQualityService(sponsorBlockService.getAPI());
+        this.videoQualityService.start();
       } catch (error) {
-        logger.warn('Main', 'SponsorBlock 初始化失败:', error.message);
+        logger.warn('Main', 'SponsorBlock初始化失败:', error.message);
       }
-      
-      // 视频质量徽章服务
-      this.videoQualityService = createVideoQualityService(sponsorBlockService.getAPI());
-      this.videoQualityService.start();
     }
 
     // 初始化通用广告跳过服务（支持YouTube和Bilibili）
     if (this.isBilibili || this.isYouTube) {
       try {
-        // 为两个平台都创建配置包装器
-        const adSkipConfig = this.isYouTube ? {
-          get: (key) => {
-            const configs = {
-              autoSkip: localStorage.getItem('youtube_auto_skip') !== 'false',
-              skipCategories: JSON.parse(localStorage.getItem('youtube_skip_categories') || '["sponsor", "selfpromo"]'),
-              showNotifications: localStorage.getItem('youtube_show_notifications') !== 'false',
-              showProgressMarkers: localStorage.getItem('youtube_show_markers') !== 'false',
-              detectNativeAds: localStorage.getItem('youtube_detect_native') !== 'false',
-              skipDelay: parseInt(localStorage.getItem('youtube_skip_delay') || '0'),
-              muteInsteadOfSkip: localStorage.getItem('youtube_mute_instead') === 'true'
-            };
-            return configs[key];
-          },
-          set: (key, value) => {
-            localStorage.setItem(`youtube_${key}`, JSON.stringify(value));
-          }
-        } : {
-          // Bilibili配置包装器
-          get: (key) => {
-            const configs = {
-              autoSkip: localStorage.getItem('bilibili_auto_skip') !== 'false',
-              skipCategories: JSON.parse(localStorage.getItem('bilibili_skip_categories') || '["sponsor", "selfpromo"]'),
-              showNotifications: localStorage.getItem('bilibili_show_notifications') !== 'false',
-              showProgressMarkers: localStorage.getItem('bilibili_show_markers') !== 'false',
-              detectNativeAds: localStorage.getItem('bilibili_detect_native') !== 'false',
-              skipDelay: parseInt(localStorage.getItem('bilibili_skip_delay') || '0'),
-              muteInsteadOfSkip: localStorage.getItem('bilibili_mute_instead') === 'true'
-            };
-            return configs[key];
-          },
-          set: (key, value) => {
-            localStorage.setItem(`bilibili_${key}`, JSON.stringify(value));
-          }
-        };
-        
+        const adSkipConfig = this.createAdSkipConfig();
         this.universalAdSkipService = new UniversalAdSkipService(adSkipConfig);
         await this.universalAdSkipService.init();
         logger.info('Main', '通用广告跳过服务已初始化');
@@ -219,7 +265,7 @@ class BilibiliSubtitleExtractor {
       }
     }
 
-    // 初始化YouTube视频标签服务（在视频列表中显示广告标签）
+    // 初始化YouTube视频标签服务
     if (this.isYouTube) {
       try {
         await youTubeVideoTagger.init();
@@ -228,81 +274,48 @@ class BilibiliSubtitleExtractor {
         logger.warn('Main', 'YouTube视频标签服务初始化失败:', error.message);
       }
     }
-
-    // 创建UI元素
-    // B站和YouTube需要完整UI（字幕面板等）
-    if (this.isBilibili || (this.isYouTube && location.pathname === '/watch')) {
-      this.createUI();
-    }
-    // 其他网站不显示UI，只通过油猴菜单访问功能
-
-    // 绑定事件
-    this.bindEvents();
-
-    // 设置自动化逻辑
-    if (this.isBilibili || (this.isYouTube && location.pathname === '/watch')) {
-      this.setupAutomation();
-    }
-
-    // 注册油猴菜单
-    this.registerMenuCommands();
-
-    // 注册快捷键 - 所有网站都可用
-    this.registerShortcuts();
-
-    if (this.isBilibili) {
-      subtitleService.checkSubtitleButton();
-      this.observeVideoChange();
-    } else if (this.isYouTube && location.pathname === '/watch') {
-      // YouTube播放页面字幕检测
-      const currentSubtitleService = platformService.getSubtitleService();
-      if (currentSubtitleService) {
-        setTimeout(async () => {
-          await currentSubtitleService.checkSubtitleAvailability();
-        }, 2000);
-      }
-      this.observeVideoChange();
-    }
-
-    this.initialized = true;
   }
 
   /**
-   * 注册全局快捷键
+   * 创建广告跳过配置（B站和YouTube）
+   * @private
+   * @returns {Object} 配置对象
    */
-  registerShortcuts() {
-    // 切换字幕面板
-    shortcutManager.register('toggleSubtitlePanel', () => {
-      state.togglePanel();
-    });
+  createAdSkipConfig() {
+    const platform = this.isYouTube ? 'youtube' : 'bilibili';
+    return {
+      get: (key) => {
+        const configs = {
+          autoSkip: localStorage.getItem(`${platform}_auto_skip`) !== 'false',
+          skipCategories: JSON.parse(localStorage.getItem(`${platform}_skip_categories`) || '["sponsor", "selfpromo"]'),
+          showNotifications: localStorage.getItem(`${platform}_show_notifications`) !== 'false',
+          showProgressMarkers: localStorage.getItem(`${platform}_show_markers`) !== 'false',
+          detectNativeAds: localStorage.getItem(`${platform}_detect_native`) !== 'false',
+          skipDelay: parseInt(localStorage.getItem(`${platform}_skip_delay`) || '0'),
+          muteInsteadOfSkip: localStorage.getItem(`${platform}_mute_instead`) === 'true'
+        };
+        return configs[key];
+      },
+      set: (key, value) => {
+        localStorage.setItem(`${platform}_${key}`, JSON.stringify(value));
+      }
+    };
+  }
 
-    // 切换笔记面板（全站可用）
+  /**
+   * 注册通用快捷键（所有网站可用）
+   */
+  registerUniversalShortcuts() {
+    // 切换笔记面板
     shortcutManager.register('toggleNotesPanel', () => {
       notesPanel.togglePanel();
     });
 
-    // 视频截图（自动保存到笔记）
+    // 视频截图（仅发送到Notion）
     shortcutManager.register('takeScreenshot', async () => {
       try {
-        // 检查是否需要发送到Notion
-        const videoInfo = state.getVideoInfo();
-        const bvid = videoInfo?.bvid;
-        const notionConfig = config.getNotionConfig();
-        
-        // 如果有Notion配置且有页面ID，则发送到Notion
-        const shouldSendToNotion = notionConfig.apiKey && bvid && state.getNotionPageId(bvid);
-        
-        // 截图并自动保存到本地笔记
-        const note = await screenshotService.captureAndSave(shouldSendToNotion);
-        if (note) {
-          notification.success(shouldSendToNotion ? '截图已保存到笔记和Notion' : '截图已保存到笔记');
-          
-          // 刷新笔记面板（如果存在）
-          const notesPanel = document.querySelector('.notes-panel');
-          if (notesPanel && notesPanel.style.display !== 'none') {
-            window.notesPanel?.render();
-          }
-        }
+        // 截图并发送到Notion（不再保存到本地笔记）
+        await screenshotService.captureAndSave(false);
       } catch (error) {
         console.error('[Main] 截图失败:', error);
         notification.error('截图失败: ' + error.message);
@@ -329,26 +342,23 @@ class BilibiliSubtitleExtractor {
       speedControlService.setToDoubleSpeed();
     });
 
+    // 平台专属快捷键（字幕面板切换）
+    if (this.isPlatformSupported) {
+      shortcutManager.register('toggleSubtitlePanel', () => {
+        state.togglePanel();
+      });
+    }
+
     // 开始监听
     shortcutManager.startListening();
   }
 
   /**
-   * 注册油猴菜单命令
+   * 注册通用油猴菜单（所有网站可用）
    */
-  registerMenuCommands() {
+  registerUniversalMenuCommands() {
     if (typeof GM_registerMenuCommand === 'undefined') {
       return;
-    }
-
-    if (this.isBilibili) {
-      GM_registerMenuCommand('AI配置', () => {
-        eventHandlers.showAIConfigModal();
-      });
-
-      GM_registerMenuCommand('Notion配置', () => {
-        eventHandlers.showNotionConfigModal();
-      });
     }
 
     // 笔记管理 - 全局可用
@@ -356,69 +366,22 @@ class BilibiliSubtitleExtractor {
       notesPanel.togglePanel();
     });
 
-    // 截图功能 - 有视频时显示
-    const hasVideo = document.querySelector('video') !== null;
-    if (hasVideo) {
-      GM_registerMenuCommand('📸 截图', async () => {
-        try {
-          const note = await screenshotService.captureAndSave(false);
-          if (note) {
-            notification.success('截图已保存到笔记');
-            const notesPanel = document.querySelector('.notes-panel');
-            if (notesPanel && notesPanel.style.display !== 'none') {
-              window.notesPanel?.render();
-            }
-          }
-        } catch (error) {
-          notification.error('截图失败: ' + error.message);
-        }
-      });
-    }
-
     // 快捷键设置 - 全局可用
     GM_registerMenuCommand('⌨️ 快捷键设置', () => {
-      logger.debug('Main', '快捷键设置菜单被点击');
-      logger.debug('Main', 'eventHandlers 是否存在:', !!eventHandlers);
-      logger.debug('Main', 'showShortcutConfigModal 是否存在:', !!eventHandlers?.showShortcutConfigModal);
-      
       if (!eventHandlers || !eventHandlers.showShortcutConfigModal) {
         console.error('[Main] eventHandlers 或其方法未正确加载');
         notification.error('快捷键设置功能未正确加载');
         return;
       }
-      
       eventHandlers.showShortcutConfigModal();
     });
 
-    if (this.isBilibili) {
-      // 字幕面板位置重置
-      GM_registerMenuCommand('🔄 重置字幕面板位置', () => {
-        const container = document.getElementById('subtitle-container');
-        if (container) {
-          eventHandlers.resetContainerPosition(container);
-          // 不自动显示面板，让用户自己决定
-        } else {
-          notification.warning('字幕面板未初始化，请先加载视频');
-        }
-      });
-      
-      GM_registerMenuCommand('SponsorBlock 设置', () => {
-        sponsorBlockModal.show();
-      });
-    }
-
-    GM_registerMenuCommand('使用帮助', () => {
+    // 使用帮助 - 全局可用
+    GM_registerMenuCommand('❓ 使用帮助', () => {
       helpModal.show();
     });
 
-    // YouTube广告跳过设置
-    if (this.isYouTube) {
-      GM_registerMenuCommand('🚫 YouTube广告设置', () => {
-        this.showYouTubeAdSettings();
-      });
-    }
-
-    // 调试模式切换
+    // 调试模式切换 - 全局可用
     GM_registerMenuCommand(`🔧 调试模式 (${logger.isDebugMode() ? '开启' : '关闭'})`, () => {
       const newState = logger.toggleDebugMode();
       notification.info(`调试模式已${newState ? '开启' : '关闭'}`);
@@ -426,6 +389,44 @@ class BilibiliSubtitleExtractor {
         notification.info('调试模式已开启，控制台将输出详细日志');
       }
     });
+  }
+
+  /**
+   * 注册平台专属菜单（仅B站/YouTube）
+   */
+  registerPlatformMenuCommands() {
+    if (typeof GM_registerMenuCommand === 'undefined') {
+      return;
+    }
+
+    if (this.isBilibili) {
+      GM_registerMenuCommand('🤖 AI配置', () => {
+        eventHandlers.showAIConfigModal();
+      });
+
+      GM_registerMenuCommand('📤 Notion配置', () => {
+        eventHandlers.showNotionConfigModal();
+      });
+
+      GM_registerMenuCommand('🔄 重置字幕面板位置', () => {
+        const container = document.getElementById('subtitle-container');
+        if (container) {
+          eventHandlers.resetContainerPosition(container);
+        } else {
+          notification.warning('字幕面板未初始化，请先加载视频');
+        }
+      });
+      
+      GM_registerMenuCommand('⚡ SponsorBlock设置', () => {
+        sponsorBlockModal.show();
+      });
+    }
+
+    if (this.isYouTube) {
+      GM_registerMenuCommand('🚫 YouTube广告设置', () => {
+        this.showYouTubeAdSettings();
+      });
+    }
   }
 
   /**
@@ -651,8 +652,6 @@ class BilibiliSubtitleExtractor {
     // 监听字幕加载完成事件
     eventBus.on(EVENTS.SUBTITLE_LOADED, (data, videoKey) => {
       this.renderSubtitles(data);
-      // 构建搜索索引（性能优化）
-      eventHandlers.initializeSearchIndex(data);
     });
 
     // 监听AI总结开始事件
@@ -1230,13 +1229,81 @@ class BilibiliSubtitleExtractor {
   }
 }
 
-// 创建应用实例并初始化
-const app = new BilibiliSubtitleExtractor();
-
-// 等待DOM加载完成后初始化
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => app.init());
-} else {
-  app.init();
-}
+// 使用立即执行函数防止重复初始化
+(function() {
+  'use strict';
+  
+  // ============ 阶段1：iframe检测（最高优先级）============
+  // 防止在iframe中运行，这是导致多次初始化的根本原因
+  if (window !== window.top) {
+    console.log('[BilibiliTools] 检测到iframe环境，跳过初始化');
+    return;
+  }
+  
+  // 环境检查日志（用于调试）
+  console.log('[BilibiliTools] 环境检查:', {
+    isTopWindow: window === window.top,
+    url: location.href,
+    hostname: location.hostname,
+    pathname: location.pathname
+  });
+  
+  // 使用 unsafeWindow 确保在所有环境中共享
+  const globalWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+  
+  // 使用更唯一的标记名称，包含版本号
+  const INIT_FLAG = '__BILIBILI_YOUTUBE_TOOLS_V1_2_20_INITIALIZED__';
+  const INSTANCE_KEY = '__BILIBILI_YOUTUBE_TOOLS_INSTANCES__';
+  
+  // 初始化实例计数器
+  if (!globalWindow[INSTANCE_KEY]) {
+    globalWindow[INSTANCE_KEY] = 0;
+  }
+  
+  // 检查是否已经初始化
+  if (globalWindow[INIT_FLAG]) {
+    const existingInstance = globalWindow[INSTANCE_KEY];
+    console.warn(`[BilibiliTools] 脚本已初始化（实例 #${existingInstance}），跳过重复执行 #${globalWindow[INSTANCE_KEY] + 1}`);
+    return; // 直接退出
+  }
+  
+  // 设置全局标记
+  globalWindow[INIT_FLAG] = true;
+  globalWindow[INSTANCE_KEY]++;
+  
+  const instanceId = globalWindow[INSTANCE_KEY];
+  console.log(`[BilibiliTools] 初始化脚本实例 #${instanceId}`);
+  
+  // 创建应用实例并初始化
+  const app = new BilibiliSubtitleExtractor();
+  
+  // 将实例ID附加到应用对象，方便调试
+  app.instanceId = instanceId;
+  
+  // 保存初始化状态
+  let initStarted = false;
+  
+  // 初始化函数，确保只执行一次
+  const initializeApp = () => {
+    if (initStarted) {
+      console.log(`[BilibiliTools] 实例 #${instanceId} - 已经开始初始化，跳过重复调用`);
+      return;
+    }
+    initStarted = true;
+    console.log(`[BilibiliTools] 实例 #${instanceId} - 开始初始化`);
+    app.init();
+  };
+  
+  // 等待DOM加载完成后初始化
+  if (document.readyState === 'loading') {
+    // 使用once选项确保事件只触发一次
+    document.addEventListener('DOMContentLoaded', initializeApp, { once: true });
+  } else {
+    // DOM已加载，直接初始化
+    initializeApp();
+  }
+  
+  // 将应用实例挂载到全局，方便调试
+  globalWindow.__BILIBILI_TOOLS_APP__ = app;
+})();
 
