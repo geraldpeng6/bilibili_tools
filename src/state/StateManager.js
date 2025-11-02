@@ -9,6 +9,7 @@ import eventBus from '../utils/EventBus.js';
 import { EVENTS } from '../constants.js';
 import taskManager from '../utils/TaskManager.js';
 import logger from '../utils/DebugLogger.js';
+import { subtitleCache, aiMarkdownCache, aiSegmentsCache, notionPageCache } from '../utils/LRUCache.js';
 
 class StateManager {
   constructor() {
@@ -18,12 +19,12 @@ class StateManager {
   /**
    * 重置所有状态
    * 解决"状态重置不完整"的问题
+   * 注意：不清除LRU缓存，LRU缓存由LRUCache自动管理
    */
   reset() {
-    // 字幕相关状态
+    // 字幕相关状态（移除cache字段，使用LRU缓存）
     this.subtitle = {
       data: null,                    // 当前字幕数据
-      cache: {},                     // 字幕缓存 {videoKey: subtitleData}
       capturedUrl: null,             // 捕获到的字幕URL
     };
 
@@ -128,46 +129,31 @@ class StateManager {
   }
 
   /**
-   * 设置字幕数据（同时更新缓存）
+   * 设置字幕数据
    * @param {Array} data - 字幕数据
-   * 注意：此方法只保存数据，不触发事件。事件应由SubtitleService统一触发，避免重复
+   * 注意：此方法只保存数据到当前状态，不触发事件，不保存到LRU缓存
+   * LRU缓存由SubtitleService统一管理
    */
   setSubtitleData(data) {
     this.subtitle.data = data;
-    
-    // 更新缓存
-    const videoKey = this.getVideoKey();
-    if (videoKey) {
-      this.subtitle.cache[videoKey] = data;
-    }
-    
+    // 不再更新缓存 - 字幕缓存由SubtitleService通过LRU缓存管理
     // 不再触发事件 - 避免重复触发（SubtitleService已经触发了）
-    // 如果data存在，事件应由调用方（SubtitleService）触发
   }
 
   /**
-   * 获取字幕数据（优先从缓存）
+   * 获取字幕数据
    * @param {string|null} videoKey - 视频键，不传则使用当前视频
    * @returns {Array|null}
+   * 注意：如果需要从缓存获取，请直接使用 subtitleCache.get(videoKey)
    */
   getSubtitleData(videoKey = null) {
-    const key = videoKey || this.getVideoKey();
-    
-    if (!key) {
-      return this.subtitle.data;
+    // 如果指定了videoKey且不是当前视频，从LRU缓存获取
+    if (videoKey && videoKey !== this.getVideoKey()) {
+      return subtitleCache.get(videoKey);
     }
     
-    // 优先从缓存获取
-    if (this.subtitle.cache[key]) {
-      return this.subtitle.cache[key];
-    }
-    
-    // 如果是当前视频，返回当前数据
-    if (key === this.getVideoKey()) {
-      return this.subtitle.data;
-    }
-    
-    return null;
+    // 返回当前视频的数据
+    return this.subtitle.data;
   }
 
   /**
@@ -186,8 +172,8 @@ class StateManager {
       return { success: false, reason: '已有相同视频的请求在进行中' };
     }
 
-    // 检查缓存
-    if (this.subtitle.cache[videoKey]) {
+    // 检查LRU缓存
+    if (subtitleCache.has(videoKey)) {
       return { success: false, reason: '已有缓存' };
     }
 
@@ -241,6 +227,7 @@ class StateManager {
   /**
    * 完成AI总结
    * @param {Object|string} summary - 总结内容（新格式为对象，包含markdown和segments）
+   * 注意：AI总结缓存由AIService通过LRU缓存管理，这里只保存当前状态
    */
   finishAISummary(summary) {
     this.ai.isSummarizing = false;
@@ -248,14 +235,10 @@ class StateManager {
     this.ai.summaryPromise = null;
     this.ai.abortController = null;
     
-    // 保存到sessionStorage
-    const videoKey = this.getVideoKey();
-    if (videoKey && summary) {
-      // 如果是对象，则序列化为JSON字符串
-      const summaryToStore = typeof summary === 'object' ? JSON.stringify(summary) : summary;
-      sessionStorage.setItem(`ai-summary-${videoKey}`, summaryToStore);
-    }
+    // 不再保存到sessionStorage - AI总结由LRU缓存管理
+    // 分别保存到aiMarkdownCache和aiSegmentsCache
     
+    const videoKey = this.getVideoKey();
     eventBus.emit(EVENTS.AI_SUMMARY_COMPLETE, summary, videoKey);
   }
 
@@ -272,9 +255,10 @@ class StateManager {
   }
 
   /**
-   * 获取AI总结（优先从缓存）
+   * 获取AI总结
    * @param {string|null} videoKey - 视频键
-   * @returns {Object|string|null}
+   * @returns {Object|null}
+   * 注意：如果需要从缓存获取，请直接使用 aiMarkdownCache 和 aiSegmentsCache
    */
   getAISummary(videoKey = null) {
     const key = videoKey || this.getVideoKey();
@@ -283,17 +267,20 @@ class StateManager {
       return this.ai.currentSummary;
     }
     
-    // 仞sessionStorage获取
-    const cached = sessionStorage.getItem(`ai-summary-${key}`);
-    if (cached) {
-      // 尝试解析JSON，如果失败则返回原始字符串
-      try {
-        return JSON.parse(cached);
-      } catch (e) {
-        return cached;
-      }
+    // 从LRU缓存获取
+    const cachedMarkdown = aiMarkdownCache.get(key);
+    const cachedSegments = aiSegmentsCache.get(key);
+    
+    // 如果都有缓存，组合返回
+    if (cachedMarkdown && cachedSegments) {
+      return {
+        markdown: cachedMarkdown,
+        segments: cachedSegments.segments || [],
+        ads: cachedSegments.ads || []
+      };
     }
     
+    // 如果只有部分缓存，返回null（不完整）
     return null;
   }
 
@@ -328,19 +315,39 @@ class StateManager {
    * 设置Notion页面ID
    * @param {string} videoKey - 视频键（包含分P信息）
    * @param {string} pageId - Notion页面ID
+   * 注意：同时保存到LRU缓存和sessionStorage
    */
   setNotionPageId(videoKey, pageId) {
     // videoKey 格式: BVxxxx-cid-p1
     this.notion.pageIds[videoKey] = pageId;
+    
+    // 同步到LRU缓存和sessionStorage
+    if (pageId) {
+      notionPageCache.set(videoKey, pageId);
+      sessionStorage.setItem(`notion-page-${videoKey}`, pageId);
+    } else {
+      // 如果pageId为null，清除缓存
+      notionPageCache.delete(videoKey);
+      sessionStorage.removeItem(`notion-page-${videoKey}`);
+    }
   }
 
   /**
    * 获取Notion页面ID
    * @param {string} videoKey - 视频键（包含分P信息）
    * @returns {string|null}
+   * 注意：优先从LRU缓存获取
    */
   getNotionPageId(videoKey) {
     // videoKey 格式: BVxxxx-cid-p1
+    
+    // 1. 从LRU缓存获取
+    const cachedPageId = notionPageCache.get(videoKey);
+    if (cachedPageId) {
+      return cachedPageId;
+    }
+    
+    // 2. 从本地状态获取
     return this.notion.pageIds[videoKey] || null;
   }
 

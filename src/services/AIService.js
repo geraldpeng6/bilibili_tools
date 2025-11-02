@@ -14,6 +14,9 @@ import taskManager from '../utils/TaskManager.js';
 import { EVENTS, TIMING, BALL_STATUS } from '../constants.js';
 import { withTimeout } from '../utils/helpers.js';
 import LogDecorator from '../utils/LogDecorator.js';
+import { aiMarkdownCache, aiSegmentsCache } from '../utils/LRUCache.js';
+import { showInfoConfirm } from '../ui/ConfirmDialog.js';
+import logger from '../utils/DebugLogger.js';
 
 class AIService {
   constructor() {
@@ -53,22 +56,66 @@ class AIService {
     // 性能监控：测量AI总结耗时
     return await performanceMonitor.measureAsync('AI总结', async () => {
       try {
-        // 检查缓存：如果已有AI总结缓存且不是手动触发，直接返回缓存
         const videoKey = state.getVideoKey();
-        if (videoKey && !isManual) {
-          const cachedSummary = state.getAISummary(videoKey);
-          if (cachedSummary) {
-            this.log.info('检测到AI总结缓存，直接使用缓存，跳过请求');
-            // 如果是对象格式，直接返回
-            if (typeof cachedSummary === 'object' && cachedSummary.markdown) {
-              return cachedSummary;
+        
+        // 检查LRU缓存：分别检查markdown和segments缓存
+        if (videoKey) {
+          const cachedMarkdown = aiMarkdownCache.get(videoKey);
+          const cachedSegments = aiSegmentsCache.get(videoKey);
+          
+          // 如果都有缓存
+          if (cachedMarkdown && cachedSegments) {
+            if (isManual) {
+              // 手动触发：询问用户是否重新生成
+              const confirmed = await showInfoConfirm(
+                '已有该视频的AI总结缓存，是否重新生成？\n\n重新生成将清除现有缓存并发起新的AI请求。',
+                'AI总结'
+              );
+              
+              if (!confirmed) {
+                this.log.info('用户取消重新生成，使用现有缓存');
+                // 组合返回完整结果
+                return {
+                  markdown: cachedMarkdown,
+                  segments: cachedSegments.segments || [],
+                  ads: cachedSegments.ads || []
+                };
+              }
+              
+              // 用户确认重新生成，清除缓存
+              this.log.info('用户确认重新生成，清除AI缓存');
+              aiMarkdownCache.delete(videoKey);
+              aiSegmentsCache.delete(videoKey);
+            } else {
+              // 自动触发：直接使用缓存
+              this.log.info('检测到完整的AI总结LRU缓存，直接使用缓存');
+              return {
+                markdown: cachedMarkdown,
+                segments: cachedSegments.segments || [],
+                ads: cachedSegments.ads || []
+              };
             }
-            // 如果是字符串格式，尝试解析（兼容旧格式）
-            try {
-              return JSON.parse(cachedSummary);
-            } catch (e) {
-              // 旧格式字符串，返回null让后续逻辑处理
-              this.log.warn('检测到旧格式缓存，需要重新生成');
+          } else if (cachedMarkdown || cachedSegments) {
+            // 部分缓存存在
+            this.log.info(`检测到部分AI缓存: markdown=${!!cachedMarkdown}, segments=${!!cachedSegments}`);
+            if (isManual) {
+              // 手动触发：询问用户
+              const confirmed = await showInfoConfirm(
+                '检测到部分AI总结缓存，是否重新生成完整总结？\n\n选择"确认"将重新生成所有部分，选择"取消"将只生成缺失部分。',
+                'AI总结'
+              );
+              
+              if (confirmed) {
+                // 清除所有缓存，重新生成
+                this.log.info('用户选择重新生成完整总结');
+                aiMarkdownCache.delete(videoKey);
+                aiSegmentsCache.delete(videoKey);
+              } else {
+                this.log.info('用户选择只生成缺失部分');
+              }
+            } else {
+              // 自动触发：只生成缺失部分
+              this.log.info('自动模式：将只生成缺失的AI总结部分');
             }
           }
         }
@@ -194,7 +241,7 @@ class AIService {
           'ai_summary', 
           taskVideoInfo,
           async (taskContext) => {
-            return await this._executeSummaryTask(subtitleData, aiConfig, headers, pureSubtitleText, timestampedSubtitleText, taskContext);
+            return await this._executeSummaryTask(subtitleData, aiConfig, headers, pureSubtitleText, timestampedSubtitleText, taskContext, isManual);
           },
           isManual
         );
@@ -262,44 +309,75 @@ class AIService {
    * 执行总结任务
    * @private
    */
-  async _executeSummaryTask(subtitleData, aiConfig, headers, pureSubtitleText, timestampedSubtitleText, taskContext) {
+  async _executeSummaryTask(subtitleData, aiConfig, headers, pureSubtitleText, timestampedSubtitleText, taskContext, isManual) {
     try {
       const { videoInfo, signal } = taskContext;
       const taskStartTime = performance.now(); // 记录任务开始时间
+      const videoKey = state.getVideoKey();
       
       this.log.info('开始AI总结任务');
 
+        // 检查LRU缓存，确定需要请求的部分
+        const cachedMarkdown = videoKey ? aiMarkdownCache.get(videoKey) : null;
+        const cachedSegments = videoKey ? aiSegmentsCache.get(videoKey) : null;
+        
+        const needMarkdown = !cachedMarkdown;
+        const needSegments = !cachedSegments;
+        
+        this.log.info(`AI请求计划: markdown=${needMarkdown ? '需要请求' : '使用缓存'}, segments=${needSegments ? '需要请求' : '使用缓存'}`);
+
         // 准备请求数组
-        // 第一个请求：Markdown格式总结（单独获取）
-        this.log.info('=== 第一部分：视频总结（Markdown格式）===');
-        this.log.debug('使用提示词类型: markdown总结');
-        this.log.debug('字幕文本长度:', pureSubtitleText.length, '字符');
+        const requests = [];
         
-        const markdownRequest = this._makeAIRequest(
-          aiConfig, 
-          headers, 
-          pureSubtitleText, 
-          aiConfig.prompt1 || this._getDefaultPrompt1(), 
-          'markdown'
-        );
+        // 第一个请求：Markdown格式总结（如果需要）
+        if (needMarkdown) {
+          this.log.info('=== 第一部分：视频总结（Markdown格式）===');
+          this.log.debug('使用提示词类型: markdown总结');
+          this.log.debug('字幕文本长度:', pureSubtitleText.length, '字符');
+          
+          const markdownRequest = this._makeAIRequestWithRetry(
+            aiConfig, 
+            headers, 
+            pureSubtitleText, 
+            aiConfig.prompt1 || this._getDefaultPrompt1(), 
+            'markdown',
+            signal,
+            3,
+            !isManual
+          );
+          requests.push(markdownRequest);
+        } else {
+          // 使用缓存
+          requests.push(Promise.resolve(cachedMarkdown));
+        }
 
-        // 第二个请求：JSON格式段落总结（包含广告检测）
-        this.log.info('=== 第二部分：段落总结（含广告检测）===');
-        this.log.debug('使用提示词类型: 段落总结+广告检测');
-        this.log.debug('字幕文本长度:', timestampedSubtitleText.length, '字符');
-        
-        const segmentsRequest = this._makeAIRequest(
-          aiConfig, 
-          headers, 
-          timestampedSubtitleText, 
-          aiConfig.prompt2 || this._getDefaultPrompt2(), 
-          'segments'
-        );
+        // 第二个请求：JSON格式段落总结（如果需要）
+        if (needSegments) {
+          this.log.info('=== 第二部分：段落总结（含广告检测）===');
+          this.log.debug('使用提示词类型: 段落总结+广告检测');
+          this.log.debug('字幕文本长度:', timestampedSubtitleText.length, '字符');
+          
+          const segmentsRequest = this._makeAIRequestWithRetry(
+            aiConfig, 
+            headers, 
+            timestampedSubtitleText, 
+            aiConfig.prompt2 || this._getDefaultPrompt2(), 
+            'segments',
+            signal,
+            3,
+            !isManual
+          );
+          requests.push(segmentsRequest);
+        } else {
+          // 使用缓存，直接返回segments数组
+          const cachedSegmentsData = cachedSegments || {};
+          requests.push(Promise.resolve(cachedSegmentsData.segments || []));
+        }
 
-        // 并行执行两个AI请求（传入signal以支持取消）
-        this.log.info('并行执行两个AI请求...');
+        // 并行执行需要的AI请求（传入signal以支持取消）
+        this.log.info(`并行执行 ${requests.length} 个请求（包含缓存）...`);
         const results = await Promise.race([
-          Promise.all([markdownRequest, segmentsRequest]),
+          Promise.all(requests),
           new Promise((_, reject) => {
             signal.addEventListener('abort', () => reject(new Error('Task aborted')));
           })
@@ -376,6 +454,18 @@ class AIService {
           this._applyAdSegments(combinedResult.ads);
         }
         
+        // 保存到LRU缓存（只保存新请求的部分）
+        if (videoKey) {
+          if (needMarkdown) {
+            aiMarkdownCache.set(videoKey, markdownSummary);
+            this.log.debug('Markdown总结已保存到LRU缓存');
+          }
+          if (needSegments) {
+            aiSegmentsCache.set(videoKey, { segments, ads });
+            this.log.debug('段落总结+广告分析已保存到LRU缓存');
+          }
+        }
+        
         this.log.success('AI总结任务完成');
         this.log.info('总结:', markdownSummary?.substring(0, 50) + '...');
         this.log.info('段落数:', segments.length, '广告数:', ads.length);
@@ -428,6 +518,51 @@ class AIService {
   }
   
   /**
+   * 执行单个AI请求（带重试机制）
+   * @private
+   * @param {Object} aiConfig - AI配置
+   * @param {Object} headers - 请求头
+   * @param {string} subtitleText - 字幕文本
+   * @param {string} prompt - 提示词
+   * @param {string} type - 请求类型 (markdown/segments)
+   * @param {AbortSignal} signal - 取消信号
+   * @param {number} maxRetries - 最大重试次数
+   * @returns {Promise<string|Array>}
+   */
+  async _makeAIRequestWithRetry(aiConfig, headers, subtitleText, prompt, type, signal, maxRetries = 3, retryOnAllErrors = false) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        this.log.debug(`AI请求尝试 ${attempt + 1}/${maxRetries}`);
+        return await this._makeAIRequest(aiConfig, headers, subtitleText, prompt, type, signal);
+      } catch (error) {
+        // 检查是否是429错误（限流）
+        const is429Error = error.message && (
+          error.message.includes('429') || 
+          error.message.includes('Too Many Requests') ||
+          error.message.includes('rate limit')
+        );
+
+        const shouldRetry = retryOnAllErrors || is429Error;
+
+        if (shouldRetry && attempt < maxRetries - 1) {
+          // 指数退避：1s, 2s, 4s
+          const delayMs = Math.pow(2, attempt) * 1000;
+          const reason = is429Error ? '限流(429)' : `错误(${error.message || 'unknown'})`;
+          this.log.warn(`AI请求失败(${reason})，等待 ${delayMs/1000}秒 后重试...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          continue;
+        }
+
+        // 如果是最后一次尝试，或者不应重试，抛出
+        if (attempt === maxRetries - 1 || !shouldRetry) {
+          this.log.error(`AI请求失败，已重试 ${attempt + 1} 次`);
+        }
+        throw error;
+      }
+    }
+  }
+
+  /**
    * 执行单个AI请求
    * @private
    * @param {Object} aiConfig - AI配置
@@ -435,9 +570,10 @@ class AIService {
    * @param {string} subtitleText - 字幕文本
    * @param {string} prompt - 提示词
    * @param {string} type - 请求类型 (markdown/segments)
+   * @param {AbortSignal} signal - 取消信号
    * @returns {Promise<string|Array>}
    */
-  async _makeAIRequest(aiConfig, headers, subtitleText, prompt, type) {
+  async _makeAIRequest(aiConfig, headers, subtitleText, prompt, type, signal) {
     const requestBody = {
       model: aiConfig.model,
       messages: [
@@ -454,7 +590,7 @@ class AIService {
       this.log.debug('发送Markdown总结请求（流式）');
       const start = performance.now();
       
-      const summaryPromise = this._streamingRequest(aiConfig.url, headers, requestBody);
+      const summaryPromise = this._streamingRequest(aiConfig.url, headers, requestBody, signal);
       
       // 添加超时保护
       const markdownContent = await withTimeout(
@@ -477,7 +613,7 @@ class AIService {
         method: 'POST',
         headers: headers,
         body: JSON.stringify(requestBody),
-        signal: state.ai.abortController?.signal
+        signal: signal || state.ai.abortController?.signal
       });
 
       if (!response.ok) {
@@ -650,14 +786,15 @@ class AIService {
    * @param {string} url - API URL
    * @param {Object} headers - 请求头
    * @param {Object} body - 请求体
+   * @param {AbortSignal} signal - 取消信号
    * @returns {Promise<string>}
    */
-  async _streamingRequest(url, headers, body) {
+  async _streamingRequest(url, headers, body, signal) {
     const response = await fetch(url, {
       method: 'POST',
       headers: headers,
       body: JSON.stringify(body),
-      signal: state.ai.abortController?.signal
+      signal: signal || state.ai.abortController?.signal
     });
 
     if (!response.ok) {

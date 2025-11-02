@@ -11,6 +11,8 @@ import performanceMonitor from '../utils/PerformanceMonitor.js';
 import { EVENTS, TIMING, SELECTORS, BALL_STATUS } from '../constants.js';
 import { getVideoInfo, delay, downloadFile, getVideoTitle } from '../utils/helpers.js';
 import { validateSubtitleData } from '../utils/validators.js';
+import { subtitleCache } from '../utils/LRUCache.js';
+import { showInfoConfirm } from '../ui/ConfirmDialog.js';
 
 class SubtitleService {
   constructor() {
@@ -80,12 +82,12 @@ class SubtitleService {
       const videoInfo = getVideoInfo();
       state.setVideoInfo(videoInfo);
 
-      // 检查缓存：如果已有字幕缓存，直接使用缓存，不处理新请求
+      // 检查LRU缓存：如果已有字幕缓存，直接使用缓存，不处理新请求
       const videoKey = state.getVideoKey();
       if (videoKey) {
-        const cachedSubtitle = state.getSubtitleData(videoKey);
+        const cachedSubtitle = subtitleCache.get(videoKey);
         if (cachedSubtitle && cachedSubtitle.length > 0) {
-          this.log.info('检测到字幕缓存，跳过拦截处理，直接使用缓存');
+          this.log.info('检测到字幕LRU缓存，跳过拦截处理，直接使用缓存');
           state.setSubtitleData(cachedSubtitle);
           state.setBallStatus(BALL_STATUS.ACTIVE);
           eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedSubtitle, videoKey);
@@ -132,7 +134,12 @@ class SubtitleService {
         this.log.success(`字幕捕获成功，共 ${subtitleData.length} 条`);
         this.log.trace('字幕数据示例:', subtitleData.slice(0, 3));
 
-        // 保存字幕数据（自动更新缓存）
+        // 保存到LRU缓存
+        if (videoKey) {
+          subtitleCache.set(videoKey, subtitleData);
+        }
+
+        // 保存字幕数据到状态管理器
         state.setSubtitleData(subtitleData);
         state.setBallStatus(BALL_STATUS.ACTIVE);
         
@@ -224,12 +231,12 @@ class SubtitleService {
    * 检测字幕按钮
    */
   async checkSubtitleButton() {
-    // 检查缓存：如果已有字幕缓存，直接返回，不触发按钮
+    // 检查LRU缓存：如果已有字幕缓存，直接返回，不触发按钮
     const videoKey = state.getVideoKey();
     if (videoKey) {
-      const cachedSubtitle = state.getSubtitleData(videoKey);
+      const cachedSubtitle = subtitleCache.get(videoKey);
       if (cachedSubtitle && cachedSubtitle.length > 0) {
-        this.log.info('检测到字幕缓存，跳过按钮触发和拦截操作');
+        this.log.info('检测到字幕LRU缓存，跳过按钮触发和拦截操作');
         state.setSubtitleData(cachedSubtitle); // 设置当前字幕数据
         state.setBallStatus(BALL_STATUS.ACTIVE);
         eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedSubtitle, videoKey);
@@ -262,12 +269,12 @@ class SubtitleService {
    * 尝试激活字幕
    */
   async tryActivateSubtitle() {
-    // 检查缓存：如果已有字幕缓存，直接返回，不触发按钮
+    // 检查LRU缓存：如果已有字幕缓存，直接返回，不触发按钮
     const videoKey = state.getVideoKey();
     if (videoKey) {
-      const cachedSubtitle = state.getSubtitleData(videoKey);
+      const cachedSubtitle = subtitleCache.get(videoKey);
       if (cachedSubtitle && cachedSubtitle.length > 0) {
-        this.log.info('检测到字幕缓存，跳过字幕按钮触发');
+        this.log.info('检测到字幕LRU缓存，跳过字幕按钮触发');
         state.setSubtitleData(cachedSubtitle); // 设置当前字幕数据
         state.setBallStatus(BALL_STATUS.ACTIVE);
         eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedSubtitle, videoKey);
@@ -280,9 +287,9 @@ class SubtitleService {
     // 延迟后再次检查：拦截器可能已经在延迟期间捕获了字幕
     const videoKeyAfterDelay = state.getVideoKey();
     if (videoKeyAfterDelay) {
-      const cachedSubtitleAfterDelay = state.getSubtitleData(videoKeyAfterDelay);
+      const cachedSubtitleAfterDelay = subtitleCache.get(videoKeyAfterDelay);
       if (cachedSubtitleAfterDelay && cachedSubtitleAfterDelay.length > 0) {
-        this.log.info('延迟后检测到字幕数据（拦截器已捕获），跳过按钮触发');
+        this.log.info('延迟后检测到字幕LRU缓存（拦截器已捕获），跳过按钮触发');
         state.setSubtitleData(cachedSubtitleAfterDelay);
         state.setBallStatus(BALL_STATUS.ACTIVE);
         eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedSubtitleAfterDelay, videoKeyAfterDelay);
@@ -304,9 +311,9 @@ class SubtitleService {
     // 再次检查：拦截器可能已经捕获了字幕（竞态条件保护）
     const videoKey = state.getVideoKey();
     if (videoKey) {
-      const cachedSubtitle = state.getSubtitleData(videoKey);
+      const cachedSubtitle = subtitleCache.get(videoKey);
       if (cachedSubtitle && cachedSubtitle.length > 0) {
-        this.log.info('触发字幕选择前检测到字幕数据（拦截器已捕获），跳过按钮点击');
+        this.log.info('触发字幕选择前检测到字幕LRU缓存（拦截器已捕获），跳过按钮点击');
         state.setSubtitleData(cachedSubtitle);
         state.setBallStatus(BALL_STATUS.ACTIVE);
         eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedSubtitle, videoKey);
@@ -329,9 +336,9 @@ class SubtitleService {
     // 点击按钮后再次检查：拦截器可能在点击时捕获了字幕
     const videoKeyAfterClick = state.getVideoKey();
     if (videoKeyAfterClick) {
-      const cachedSubtitleAfterClick = state.getSubtitleData(videoKeyAfterClick);
+      const cachedSubtitleAfterClick = subtitleCache.get(videoKeyAfterClick);
       if (cachedSubtitleAfterClick && cachedSubtitleAfterClick.length > 0) {
-        this.log.info('点击按钮后检测到字幕数据（拦截器已捕获），跳过后续操作');
+        this.log.info('点击按钮后检测到字幕LRU缓存（拦截器已捕获），跳过后续操作');
         // 关闭菜单（如果已打开）
         const closeBtn = document.querySelector(SELECTORS.SUBTITLE_CLOSE_SWITCH);
         if (closeBtn) {
@@ -378,9 +385,9 @@ class SubtitleService {
       // 检查拦截器是否已经捕获了字幕数据（而不是URL）
       const videoKeyAfterWait = state.getVideoKey();
       if (videoKeyAfterWait) {
-        const cachedSubtitleAfterWait = state.getSubtitleData(videoKeyAfterWait);
+        const cachedSubtitleAfterWait = subtitleCache.get(videoKeyAfterWait);
         if (cachedSubtitleAfterWait && cachedSubtitleAfterWait.length > 0) {
-          this.log.info('等待后检测到字幕数据（拦截器已捕获），跳过URL检查');
+          this.log.info('等待后检测到字幕LRU缓存（拦截器已捕获），跳过URL检查');
           state.setSubtitleData(cachedSubtitleAfterWait);
           state.setBallStatus(BALL_STATUS.ACTIVE);
           eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedSubtitleAfterWait, videoKeyAfterWait);
@@ -417,9 +424,9 @@ class SubtitleService {
         // 检查拦截器是否已经捕获了字幕数据
         const videoKeyAfterFirstOption = state.getVideoKey();
         if (videoKeyAfterFirstOption) {
-          const cachedSubtitleAfterFirstOption = state.getSubtitleData(videoKeyAfterFirstOption);
+          const cachedSubtitleAfterFirstOption = subtitleCache.get(videoKeyAfterFirstOption);
           if (cachedSubtitleAfterFirstOption && cachedSubtitleAfterFirstOption.length > 0) {
-            this.log.info('选择第一个选项后检测到字幕数据（拦截器已捕获），跳过URL检查');
+            this.log.info('选择第一个选项后检测到字幕LRU缓存（拦截器已捕获），跳过URL检查');
             state.setSubtitleData(cachedSubtitleAfterFirstOption);
             state.setBallStatus(BALL_STATUS.ACTIVE);
             eventBus.emit(EVENTS.SUBTITLE_LOADED, cachedSubtitleAfterFirstOption, videoKeyAfterFirstOption);

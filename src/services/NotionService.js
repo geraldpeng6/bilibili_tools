@@ -11,6 +11,8 @@ import notification from '../ui/Notification.js';
 import { EVENTS, API, LIMITS } from '../constants.js';
 import { getVideoTitle, getVideoUrl, getVideoCreator, formatTime } from '../utils/helpers.js';
 import { generateCacheKey } from '../utils/validators.js';
+import { notionPageCache } from '../utils/LRUCache.js';
+import { showInfoConfirm } from '../ui/ConfirmDialog.js';
 
 class NotionService {
   /**
@@ -127,14 +129,46 @@ class NotionService {
       const schema = await this._getDatabaseSchema(notionConfig.apiKey, databaseId);
       const properties = this._buildProperties(schema, videoInfo, videoTitle, videoUrl, creator, [], null);
 
-      // 创建或更新主页面
+      // 获取或查询主页面ID
       const videoKey = generateCacheKey(videoInfo);
-      let mainPageId = state.getNotionPageId(videoKey);
+      let mainPageId = await this._getOrQueryPageId(notionConfig.apiKey, notionConfig.databaseId, videoInfo, videoKey);
+      
+      // 检查重复发送
+      if (mainPageId) {
+        if (!isAuto) {
+          // 手动发送：询问用户是否重复发送
+          const confirmed = await showInfoConfirm(
+            '该视频已发送到Notion，是否重复发送？\n\n重复发送将创建新的Notion页面。',
+            'Notion发送'
+          );
+          
+          if (!confirmed) {
+            logger.info('NotionService', '用户取消重复发送');
+            notification.info('已取消发送');
+            return;
+          }
+          
+          // 用户确认重复发送，清除pageId缓存，创建新页面
+          logger.info('NotionService', '用户确认重复发送，将创建新页面');
+          mainPageId = null;
+          notionPageCache.delete(videoKey);
+          sessionStorage.removeItem(`notion-page-${videoKey}`);
+          state.setNotionPageId(videoKey, null);
+        } else {
+          // 自动发送：静默跳过
+          logger.info('NotionService', '该视频已发送到Notion，自动发送跳过');
+          return;
+        }
+      }
+      
       const isNewPage = !mainPageId;
       
       if (isNewPage) {
         mainPageId = await this._createPage(notionConfig.apiKey, databaseId, properties, mainPageChildren);
+        // 保存到所有缓存位置
         state.setNotionPageId(videoKey, mainPageId);
+        notionPageCache.set(videoKey, mainPageId);
+        sessionStorage.setItem(`notion-page-${videoKey}`, mainPageId);
         logger.info('[NotionService] ✓ 主页面创建成功');
       } else {
         // 更新现有页面
@@ -265,6 +299,60 @@ class NotionService {
     });
   }
 
+
+  /**
+   * 获取或查询页面ID（带缓存恢复）
+   * @private
+   * @param {string} apiKey - API Key
+   * @param {string} databaseId - 数据库ID
+   * @param {Object} videoInfo - 视频信息
+   * @param {string} videoKey - 视频缓存键
+   * @returns {Promise<string|null>} - 返回页面ID或null
+   */
+  async _getOrQueryPageId(apiKey, databaseId, videoInfo, videoKey) {
+    // 1. 尝试从LRU缓存获取
+    let pageId = notionPageCache.get(videoKey);
+    if (pageId) {
+      logger.debug('NotionService', `从LRU缓存获取pageId: ${pageId}`);
+      return pageId;
+    }
+    
+    // 2. 尝试从StateManager获取
+    pageId = state.getNotionPageId(videoKey);
+    if (pageId) {
+      logger.debug('NotionService', `从StateManager获取pageId: ${pageId}`);
+      // 同步到LRU缓存
+      notionPageCache.set(videoKey, pageId);
+      return pageId;
+    }
+    
+    // 3. 尝试从sessionStorage恢复
+    pageId = sessionStorage.getItem(`notion-page-${videoKey}`);
+    if (pageId) {
+      logger.info('NotionService', `从sessionStorage恢复pageId: ${pageId}`);
+      // 同步到所有缓存
+      notionPageCache.set(videoKey, pageId);
+      state.setNotionPageId(videoKey, pageId);
+      return pageId;
+    }
+    
+    // 4. 查询远端Notion
+    if (databaseId && videoInfo.bvid) {
+      const p = videoInfo.p || 1;
+      pageId = await this.queryVideoPage(apiKey, databaseId, videoInfo.bvid, p);
+      if (pageId) {
+        logger.info('NotionService', `从远端Notion查询到pageId: ${pageId}`);
+        // 保存到所有缓存
+        notionPageCache.set(videoKey, pageId);
+        state.setNotionPageId(videoKey, pageId);
+        sessionStorage.setItem(`notion-page-${videoKey}`, pageId);
+        return pageId;
+      }
+    }
+    
+    // 5. 没有找到
+    return null;
+  }
 
   /**
    * 查询视频对应的Notion页面
