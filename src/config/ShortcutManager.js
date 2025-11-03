@@ -10,17 +10,48 @@ const STORAGE_KEY = 'bilibili_shortcuts_config';
 // 检测操作系统
 const IS_MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
+/**
+ * 快捷键配置辅助函数
+ * 简化快捷键配置，自动填充默认值
+ * @param {string} key - 按键代码（如 'KeyB', 'Period', 'Slash'）
+ * @param {Object} options - 配置选项
+ * @param {boolean} options.cmd - 是否需要 Cmd/Ctrl 键（跨平台）
+ * @param {boolean} options.alt - 是否需要 Alt 键
+ * @param {boolean} options.shift - 是否需要 Shift 键
+ * @param {boolean} options.doubleClickMode - 是否是双击模式
+ * @param {boolean} options.holdMode - 是否是长按模式
+ * @param {string} options.description - 快捷键描述
+ * @returns {Object} 规范化的快捷键配置
+ */
+function createShortcut(key, { cmd = false, alt = false, shift = false, doubleClickMode = false, holdMode = false, description }) {
+  return {
+    key,
+    meta: cmd,      // Mac Command 键
+    ctrl: cmd,      // Windows Ctrl 键（会根据平台自动处理）
+    alt,
+    shift,
+    doubleClickMode,
+    holdMode,
+    description
+  };
+}
+
 // 默认快捷键配置
-// 注意：meta 字段表示 Mac Command 键，ctrl 字段表示 Windows Ctrl 键
-// 在 matches() 方法中会自动根据操作系统进行转换
+// 使用 createShortcut 简化配置，自动处理跨平台修饰键
 const DEFAULT_SHORTCUTS = {
-  toggleSubtitlePanel: { key: 'KeyB', meta: true, ctrl: true, alt: false, shift: false, description: '切换字幕面板' },
-  toggleNotesPanel: { key: 'Slash', meta: false, ctrl: false, alt: false, shift: true, description: '切换笔记面板' },
-  takeScreenshot: { key: 'Slash', meta: true, ctrl: true, alt: false, shift: false, description: '截图并保存到笔记' },
-  speedIncrease: { key: 'Period', meta: false, ctrl: false, alt: false, shift: false, description: '增加播放速度' },
-  speedDecrease: { key: 'Comma', meta: false, ctrl: false, alt: false, shift: false, description: '减少播放速度' },
-  speedReset: { key: 'Comma', meta: false, ctrl: false, alt: false, shift: false, doubleClick: true, description: '重置播放速度(双击)' },
-  speedDouble: { key: 'Period', meta: false, ctrl: false, alt: false, shift: false, doubleClick: true, description: '2倍速(双击)' },
+  // 字幕和笔记
+  toggleSubtitlePanel: createShortcut('KeyB', { cmd: true, description: '切换字幕面板' }),
+  toggleNotesPanel: createShortcut('Slash', { shift: true, description: '切换笔记面板' }),
+  takeScreenshot: createShortcut('Slash', { cmd: true, description: '截图并保存到笔记' }),
+  
+  // 播放速度控制
+  speedIncrease: createShortcut('Period', { description: '增加播放速度' }),
+  speedDecrease: createShortcut('Comma', { description: '减少播放速度' }),
+  speedReset: createShortcut('Comma', { doubleClickMode: true, description: '重置播放速度(双击)' }),
+  speedDouble: createShortcut('Period', { doubleClickMode: true, description: '2倍速(双击)' }),
+  
+  // Option 键加速（长按临时加速，双击永久加速）
+  speedBoost: createShortcut('AltRight', { holdMode: true, description: '长按临时加速/双击永久加速' }),
 };
 
 // 快捷键说明：
@@ -43,6 +74,22 @@ class ShortcutManager {
   }
 
   /**
+   * 规范化快捷键配置
+   * 确保所有必需的属性都存在
+   */
+  normalizeShortcut(shortcut) {
+    return {
+      ...shortcut,
+      meta: shortcut.meta || false,
+      ctrl: shortcut.ctrl || false,
+      alt: shortcut.alt || false,
+      shift: shortcut.shift || false,
+      doubleClickMode: shortcut.doubleClickMode || false,
+      holdMode: shortcut.holdMode || false,
+    };
+  }
+
+  /**
    * 加载快捷键配置
    */
   loadShortcuts() {
@@ -58,18 +105,15 @@ class ShortcutManager {
       const merged = { ...DEFAULT_SHORTCUTS };
       for (const [key, shortcut] of Object.entries(shortcuts)) {
         if (shortcut.key && shortcut.key !== '(双击)' && shortcut.key !== '') {
-          merged[key] = shortcut;
+          merged[key] = this.normalizeShortcut(shortcut);
         } else {
-          logger.warn('ShortcutManager', `修复损坏的快捷键配置: ${key}`);
-          if (DEFAULT_SHORTCUTS[key]) {
-            merged[key] = { ...DEFAULT_SHORTCUTS[key] };
-          }
+          logger.warn('ShortcutManager', `跳过损坏的快捷键配置: ${key}，使用默认值`);
         }
       }
       
       return merged;
     } catch (error) {
-      console.error('加载快捷键配置失败:', error);
+      logger.error('ShortcutManager', '加载快捷键配置失败，使用默认配置', error);
       return { ...DEFAULT_SHORTCUTS };
     }
   }
@@ -132,13 +176,14 @@ class ShortcutManager {
       const keyMatch = shortcut.key === config.key;
       const altMatch = shortcut.alt === config.alt;
       const shiftMatch = shortcut.shift === config.shift;
-      const doubleClickMatch = shortcut.doubleClick === config.doubleClick;
+      const doubleClickMatch = (shortcut.doubleClickMode || false) === (config.doubleClickMode || false);
+      const holdModeMatch = (shortcut.holdMode || false) === (config.holdMode || false);
       
       // 比较修饰键（支持跨平台）
       const metaMatch = (shortcut.meta || false) === (config.meta || false);
       const ctrlMatch = (shortcut.ctrl || false) === (config.ctrl || false);
       
-      if (keyMatch && metaMatch && ctrlMatch && altMatch && shiftMatch && doubleClickMatch) {
+      if (keyMatch && metaMatch && ctrlMatch && altMatch && shiftMatch && doubleClickMatch && holdModeMatch) {
         return shortcut.description;
       }
     }
@@ -147,6 +192,8 @@ class ShortcutManager {
 
   /**
    * 注册快捷键处理器
+   * @param {string} name - 快捷键名称
+   * @param {Function|Object} handler - 处理器函数，或包含 press/release 方法的对象
    */
   register(name, handler) {
     this.handlers.set(name, handler);
@@ -219,33 +266,49 @@ class ShortcutManager {
                         event.target.isContentEditable;
 
     for (const [name, shortcut] of Object.entries(this.shortcuts)) {
-      // 处理长按模式
+      // 检查按键是否匹配（支持特殊键如 AltRight）
+      const keyMatches = event.code === shortcut.key || 
+                        (shortcut.key === 'AltRight' && event.code === 'AltRight' && event.location === 2);
+      
+      if (!keyMatches) continue;
+
+      // 处理长按模式（支持按下和双击）
       if (shortcut.holdMode) {
-        if (event.code === shortcut.key) {
-          const handler = this.handlers.get(name);
-          if (handler) {
-            event.preventDefault();
-            handler(event);
+        event.preventDefault();
+        
+        // 检测双击
+        const now = Date.now();
+        if (!this.lastKeyPressTime) {
+          this.lastKeyPressTime = {};
+        }
+        const lastPress = this.lastKeyPressTime[shortcut.key] || 0;
+        const timeDiff = now - lastPress;
+        
+        const handler = this.handlers.get(name);
+        if (handler) {
+          // 双击检测（300ms内）
+          if (timeDiff < 300) {
+            // 双击：调用 doubleClick 方法（如果存在）
+            if (typeof handler.doubleClick === 'function') {
+              handler.doubleClick(event);
+            }
+            this.lastKeyPressTime[shortcut.key] = 0; // 重置
+          } else {
+            // 单次按下：调用 press 方法或直接调用函数
+            if (typeof handler.press === 'function') {
+              handler.press(event);
+            } else if (typeof handler === 'function') {
+              handler(event);
+            }
+            this.lastKeyPressTime[shortcut.key] = now;
           }
         }
         continue;
       }
 
-      // 处理双击模式
+      // 处理双击模式（统一处理）
       if (shortcut.doubleClickMode) {
-        if (event.code === shortcut.key) {
-          this.handleDoubleClick(event, name, shortcut);
-        }
-        continue;
-      }
-
-      // 处理旧的doubleClick类型的快捷键
-      if (shortcut.doubleClick) {
-        // 截图快捷键特殊处理
-        if (name === 'takeScreenshot') {
-          this.handleDoubleClick(event, name, shortcut);
-        }
-        // 其他双击快捷键由SpeedControlService处理
+        this.handleDoubleClick(event, name, shortcut);
         continue;
       }
 
@@ -261,7 +324,9 @@ class ShortcutManager {
         const handler = this.handlers.get(name);
         if (handler) {
           event.preventDefault();
-          handler(event);
+          if (typeof handler === 'function') {
+            handler(event);
+          }
         }
       }
     }
@@ -272,11 +337,15 @@ class ShortcutManager {
    */
   handleKeyUp(event) {
     for (const [name, shortcut] of Object.entries(this.shortcuts)) {
+      // 检查按键是否匹配（支持特殊键如 AltRight）
+      const keyMatches = event.code === shortcut.key || 
+                        (shortcut.key === 'AltRight' && event.code === 'AltRight' && event.location === 2);
+      
       // 处理长按模式的松开
-      if (shortcut.holdMode && event.code === shortcut.key) {
-        // 调用处理器的 release 方法（如果存在）
+      if (shortcut.holdMode && keyMatches) {
         const handler = this.handlers.get(name);
-        if (handler && handler.release) {
+        // 调用处理器的 release 方法（如果存在）
+        if (handler && typeof handler.release === 'function') {
           event.preventDefault();
           handler.release(event);
         }
@@ -373,10 +442,6 @@ class ShortcutManager {
     if (keyName.length === 1) keyName = keyName.toUpperCase();
     
     parts.push(keyName);
-    
-    if (shortcut.doubleClick) {
-      parts.push('(双击)');
-    }
     
     return parts.join(' + ');
   }

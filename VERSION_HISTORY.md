@@ -1,3 +1,97 @@
+## v1.3.4 (2025-11-03 21:55)
+- 更新时间: 2025-11-03 21:55
+- 更新类型: patch
+- 更新说明: 🎯 统一快捷键管理架构，所有快捷键功能集中到 ShortcutManager
+  
+  **架构重构：**
+  - 将 SpeedControlService 的 Option 键处理迁移到 ShortcutManager 统一管理
+  - 新增 `speedBoost` 快捷键（右侧 Option 键）：长按临时加速、双击永久加速
+  - 增强 ShortcutManager 的长按模式，支持 press/release/doubleClick 多种回调
+  - 支持特殊键检测（如 AltRight + location === 2）
+  
+  **代码解耦：**
+  - SpeedControlService 移除所有键盘事件监听代码（~70 行）
+  - 清理不再使用的状态变量（isRightOptionPressed、lastKeyPressTime 等）
+  - 所有快捷键逻辑现在统一在 ShortcutManager 中维护
+  
+  **复用性提升：**
+  - 长按模式现在支持对象形式的处理器：`{ press, release, doubleClick }`
+  - 更容易扩展新的长按/双击快捷键功能
+  - 代码结构更清晰，职责分离明确
+  
+  **功能保持：**
+  - Option 键的所有原有功能完全保持不变
+  - 长按 Option 键：临时 1.5 倍加速
+  - 双击 Option 键：永久 1.5 倍加速
+  - 松开 Option 键：取消临时加速
+
+---
+
+## v1.3.3 (2025-11-03 21:47)
+- 更新时间: 2025-11-03 21:47
+- 更新类型: patch
+- 更新说明: 🧹 移除向后兼容代码，进一步简化快捷键管理架构
+  
+  **代码精简：**
+  - 移除 `normalizeShortcut` 中将旧 `doubleClick` 转换为 `doubleClickMode` 的兼容逻辑
+  - 精简 `loadShortcuts` 方法，移除冗余的向后兼容检查和日志
+  - 优化错误处理逻辑，使用 logger 统一输出
+  
+  **架构改进：**
+  - `normalizeShortcut` 现在只负责规范化和填充默认值，逻辑更清晰
+  - `loadShortcuts` 更简洁，损坏的配置直接跳过使用默认值
+  - 减少约 15 行代码，提升代码可读性
+  
+  **⚠️ 注意：**
+  - 此版本不再支持旧的 `doubleClick` 属性
+  - 用户需重新设置双击快捷键（如遇到问题）
+
+---
+
+## v1.3.2 (2025-11-03 21:45)
+- 更新时间: 2025-11-03 21:45
+- 更新类型: patch
+- 更新说明: ♻️ 重构快捷键配置架构，简化代码、提升可维护性
+  
+  **代码优化：**
+  - 创建 `createShortcut` 辅助函数，统一管理快捷键配置生成
+  - 简化默认快捷键配置，从冗长的属性声明改为简洁的函数调用
+  - 示例：`{ key: 'KeyB', meta: true, ctrl: true, alt: false, shift: false, description: '...' }` 
+    → `createShortcut('KeyB', { cmd: true, description: '...' })`
+  
+  **架构改进：**
+  - 新增 `normalizeShortcut` 方法，统一处理配置规范化和向后兼容
+  - 确保所有布尔属性都有明确的默认值（false）
+  - 自动填充缺失的属性，防止配置错误
+  
+  **代码质量提升：**
+  - 减少重复代码，提高配置可读性
+  - 统一管理跨平台修饰键（cmd 参数自动映射到 meta/ctrl）
+  - 更容易添加和维护新的快捷键
+
+---
+
+## v1.3.1 (2025-11-03 21:42)
+- 更新时间: 2025-11-03 21:42
+- 更新类型: patch
+- 更新说明: 🐛 修复默认双击快捷键（`,`,`.`）失效问题，统一快捷键管理架构
+  
+  **问题修复：**
+  - 修复 `,`（双击重置速度）和 `.`（双击2倍速）默认快捷键失效的问题
+  - 问题原因：默认配置使用了旧的 `doubleClick` 属性，但新代码期望 `doubleClickMode` 属性
+  
+  **架构改进：**
+  - 统一使用 `doubleClickMode` 管理所有双击快捷键
+  - 移除冗余的 `doubleClick` 属性及其特殊处理逻辑
+  - 简化 ShortcutManager 的 handleKeyDown 方法，所有双击快捷键统一由 handleDoubleClick 处理
+  - 优化冲突检测逻辑，同时检查 `doubleClickMode` 和 `holdMode`
+  
+  **向后兼容：**
+  - 自动将旧配置中的 `doubleClick` 转换为 `doubleClickMode`
+  - 已有用户的自定义快捷键配置可无缝升级
+
+---
+
 ## v1.3.0 (2025-11-03 02:22)
 - 更新时间: 2025-11-03 02:22
 - 更新类型: minor

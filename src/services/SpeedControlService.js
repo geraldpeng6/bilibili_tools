@@ -23,11 +23,7 @@ class SpeedControlService {
     
     this.state = {
       baseSpeed: 1.0,
-      isRightOptionPressed: false,
       isTempBoosted: false,
-      lastKeyPressTime: { comma: 0, period: 0 },
-      lastOptionPressTime: 0,
-      optionDoubleClickTimer: null,
     };
     this.observer = null;
     this.initialized = false;
@@ -46,7 +42,7 @@ class SpeedControlService {
       return;
     }
     
-    this.bindKeyboardEvents();
+    // 键盘事件由 ShortcutManager 统一管理
     this.observeMediaElements();
     this.applySpeedToExistingMedia();
     this.initialized = true;
@@ -179,20 +175,6 @@ class SpeedControlService {
   }
 
   /**
-   * 检测双击
-   */
-  detectDoubleClick(keyType) {
-    const now = Date.now();
-    const lastTime = this.state.lastKeyPressTime[keyType];
-    this.state.lastKeyPressTime[keyType] = now;
-
-    if (now - lastTime < SPEED_CONFIG.doubleClickDelay) {
-      return true;
-    }
-    return false;
-  }
-
-  /**
    * 计算最终速度（考虑所有加速因素）
    */
   calculateFinalSpeed() {
@@ -203,60 +185,6 @@ class SpeedControlService {
     }
     
     return Math.min(SPEED_CONFIG.maxSpeed, speed);
-  }
-
-
-  /**
-   * 绑定键盘事件（仅保留 Option 键的硬编码，其他通过快捷键系统）
-   */
-  bindKeyboardEvents() {
-    document.addEventListener('keydown', (event) => this.handleKeyDown(event), true);
-    document.addEventListener('keyup', (event) => this.handleKeyUp(event), true);
-  }
-
-  /**
-   * 键盘按下事件处理（仅处理 Option 键长按加速）
-   */
-  handleKeyDown(event) {
-    // 检测右侧Option键（长按加速）
-    if (event.code === 'AltRight' && event.location === 2) {
-      if (!this.state.isRightOptionPressed) {
-        this.state.isRightOptionPressed = true;
-        
-        const now = Date.now();
-        if (now - this.state.lastOptionPressTime < SPEED_CONFIG.doubleClickDelay) {
-          this.applyPermanentBoost();
-          
-          if (this.state.optionDoubleClickTimer) {
-            clearTimeout(this.state.optionDoubleClickTimer);
-            this.state.optionDoubleClickTimer = null;
-          }
-        } else {
-          this.applyTemporaryBoost();
-        }
-        
-        this.state.lastOptionPressTime = now;
-      }
-      return;
-    }
-  }
-
-  /**
-   * 键盘释放事件处理（仅处理 Option 键松开）
-   */
-  handleKeyUp(event) {
-    if (event.code === 'AltRight' && event.location === 2) {
-      if (this.state.isRightOptionPressed) {
-        this.state.isRightOptionPressed = false;
-        
-        this.state.optionDoubleClickTimer = setTimeout(() => {
-          if (!this.state.isRightOptionPressed && this.state.isTempBoosted) {
-            this.removeTemporaryBoost();
-          }
-        }, SPEED_CONFIG.doubleClickDelay);
-      }
-      return;
-    }
   }
 
   /**

@@ -342,6 +342,19 @@ class BilibiliSubtitleExtractor {
       speedControlService.setToDoubleSpeed();
     });
 
+    // Option 键加速（长按临时加速，双击永久加速）
+    shortcutManager.register('speedBoost', {
+      press: () => {
+        speedControlService.applyTemporaryBoost();
+      },
+      release: () => {
+        speedControlService.removeTemporaryBoost();
+      },
+      doubleClick: () => {
+        speedControlService.applyPermanentBoost();
+      }
+    });
+
     // 平台专属快捷键（字幕面板切换）
     if (this.isPlatformSupported) {
       shortcutManager.register('toggleSubtitlePanel', () => {
