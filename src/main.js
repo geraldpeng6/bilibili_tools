@@ -162,7 +162,7 @@ class BilibiliSubtitleExtractor {
       injectStyles();
       
       // 初始化笔记服务 - 所有网站都可以选中文字保存笔记
-      notesService.init();
+      await notesService.init();
       
       // 初始化速度控制服务 - 所有网站的视频都可以控制速度
       speedControlService.init();

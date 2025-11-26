@@ -247,6 +247,7 @@ export const STORAGE_KEYS = {
 // ==================== Z-Index层级 ====================
 export const Z_INDEX = {
   BALL: 2147483647,                   // 最高层
+  NOTES_PANEL: 2147483647,            // 笔记面板，确保在最上层
   CONTAINER: 2147483646,              // 次高层
   TOAST: 2147483645,                  // Toast层
   NOTION_MODAL: 2147483644,           // Notion模态框
