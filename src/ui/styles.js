@@ -1765,7 +1765,7 @@ export const CSS_STYLES = `
       inset 0 -1px 0 rgba(0, 0, 0, 0.2);
     resize: both;
     overflow: hidden;  /* 改为 hidden，只允许内部 body 滚动 */
-    z-index: ${Z_INDEX.MODAL};
+    z-index: ${Z_INDEX.NOTES_PANEL};
     display: none;
     flex-direction: column;
   }
